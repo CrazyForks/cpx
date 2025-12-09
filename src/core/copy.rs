@@ -41,6 +41,13 @@ pub async fn copy(
     }
 
     let pb = ProgressBar::new(metadata_src.len());
+    pb.set_message(format!(
+        "{}",
+        source
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("<unknown file>")
+    ));
     style.apply(&pb);
 
     if let Some(dest_meta) = metadata_dest {
@@ -122,7 +129,7 @@ pub async fn multiple_copy(
 
             let metadata = tokio::fs::metadata(&source).await?;
             let pb = mp.add(ProgressBar::new(metadata.len()));
-            pb.set_message(format!("Copying {}", file_name.to_string_lossy()));
+            pb.set_message(format!("{}", file_name.to_string_lossy()));
             style_cloned.apply(&pb);
 
             do_copy(&source, &dest_path, &pb).await?;
@@ -212,7 +219,7 @@ pub async fn do_copy_directory(
                     .await
                     .map_err(|_| io::Error::new(io::ErrorKind::Other, "Semaphore closed"))?;
                 let pb = mp.add(ProgressBar::new(len));
-                pb.set_message(format!("Copying {}", file_name.to_string_lossy()));
+                pb.set_message(format!("{}", file_name.to_string_lossy()));
                 style_cloned.apply(&pb);
                 let result = do_copy(&path, &dest_path, &pb).await;
                 drop(permit);

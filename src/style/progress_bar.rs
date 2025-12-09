@@ -12,21 +12,21 @@ impl ProgressBarStyle {
         let style = match self {
              ProgressBarStyle::Default => {
                 ProgressStyle::default_bar()
-                    .template("{spinner} {binary_bytes}/{binary_total_bytes} • ETA: {eta}\n[{wide_bar}]")
+                    .template(" {spinner} {msg} • {binary_bytes}/{binary_total_bytes} • ETA: {eta}\n[{wide_bar}]")
                     .unwrap()
                     .progress_chars("━━╾─")
             }
             ProgressBarStyle::Minimal => {
                 ProgressStyle::default_bar()
-                    .template("{percent}%\n[{wide_bar}]")
+                    .template("{spinner} {msg} • {percent}%\n[{wide_bar}]")
                     .unwrap()
-                    .progress_chars("█▓▒░ ")
+                    .progress_chars("•-")
             }
             ProgressBarStyle::Detailed => {
                 ProgressStyle::default_bar()
-                    .template("{spinner} {binary_bytes}/{binary_total_bytes} • {binary_bytes_per_sec} • Elapsed: {elapsed_precise} • ETA: {eta_precise}\n[{wide_bar}]")
+                    .template("{spinner} {msg} • {binary_bytes}/{binary_total_bytes} • {binary_bytes_per_sec} • Elapsed: {elapsed_precise} • ETA: {eta_precise}\n[{wide_bar}]")
                     .unwrap()
-                    .progress_chars("=>- ")
+                    .progress_chars("=>-")
             }
         };
         pb.set_style(style);
