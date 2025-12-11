@@ -37,6 +37,10 @@ impl CopyPlan {
     pub fn add_directory(&mut self, path: PathBuf) {
         self.directories.push(path);
     }
+
+    pub fn sort_by_size_desc(&mut self) {
+        self.files.sort_by(|a, b|b.size.cmp(&a.size));
+    }
 }
 
 pub async fn preprocess_file(source: &Path, destination: &Path) -> io::Result<CopyPlan> {
@@ -89,6 +93,7 @@ pub async fn preprocess_directory(source: &Path, destination: &Path) -> io::Resu
             }
         }
     }
+    plan.sort_by_size_desc();
     Ok(plan)
 }
 
@@ -118,5 +123,6 @@ pub async fn preprocess_multiple(sources: &[PathBuf], destination: &Path) -> io:
             plan.add_file(source.clone(), dest_path, metadata.len());
         }
     }
+    plan.sort_by_size_desc();
     Ok(plan)
 }
