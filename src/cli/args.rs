@@ -20,4 +20,11 @@ pub struct CLIArgs {
         help = "Number of concurrent copy operations for multiple files"
     )]
     pub concurrency: usize,
+
+    #[arg(
+        short = 'c',
+        long = "continue",
+        help = "Continue copying by skipping files that are already complete"
+    )]
+    pub continue_copy: bool,
 }

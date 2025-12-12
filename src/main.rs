@@ -18,10 +18,18 @@ async fn main() {
             style,
             args.recursive,
             args.concurrency,
+            args.continue_copy,
         )
         .await
     } else {
-        multiple_copy(args.sources, args.destination, style, args.concurrency).await
+        multiple_copy(
+            args.sources,
+            args.destination,
+            style,
+            args.concurrency,
+            args.continue_copy,
+        )
+        .await
     };
     match result {
         Ok(_) => println!("File copied successfully."),

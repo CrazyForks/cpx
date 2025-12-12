@@ -16,6 +16,7 @@ pub async fn copy(
     style: ProgressBarStyle,
     recursive: bool,
     concurrency: usize,
+    resume: bool,
 ) -> io::Result<()> {
     let metadata_src = tokio::fs::metadata(source).await?;
 
@@ -39,10 +40,16 @@ pub async fn copy(
             }
         }
 
-        preprocess_directory(source, destination).await?
+        preprocess_directory(source, destination, resume).await?
     } else {
-        preprocess_file(source, destination).await?
+        preprocess_file(source, destination, resume).await?
     };
+    if plan.skipped_files > 0 {
+        eprintln!(
+            "Skipping {} files ({} bytes) that already exist",
+            plan.skipped_files, plan.skipped_size
+        );
+    }
     execute_copy(plan, style, concurrency).await
 }
 
@@ -51,8 +58,15 @@ pub async fn multiple_copy(
     destination: PathBuf,
     style: ProgressBarStyle,
     concurrency: usize,
+    resume: bool,
 ) -> io::Result<()> {
-    let plan = preprocess_multiple(&sources, &destination).await?;
+    let plan = preprocess_multiple(&sources, &destination, resume).await?;
+    if plan.skipped_files > 0 {
+        eprintln!(
+            "Skipping {} files ({} bytes) that already exist",
+            plan.skipped_files, plan.skipped_size
+        );
+    }
     execute_copy(plan, style, concurrency).await
 }
 

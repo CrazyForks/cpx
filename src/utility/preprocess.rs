@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 use tokio::io;
+use tokio::io::AsyncReadExt;
+use xxhash_rust::xxh3::Xxh3;
+
 #[derive(Debug, Clone)]
 pub struct FileTask {
     pub source: PathBuf,
@@ -13,6 +16,8 @@ pub struct CopyPlan {
     pub directories: Vec<PathBuf>,
     pub total_size: u64,
     pub total_files: usize,
+    pub skipped_files: usize,
+    pub skipped_size: u64,
 }
 
 impl CopyPlan {
@@ -22,6 +27,8 @@ impl CopyPlan {
             directories: Vec::new(),
             total_size: 0,
             total_files: 0,
+            skipped_files: 0,
+            skipped_size: 0,
         }
     }
     pub fn add_file(&mut self, source: PathBuf, destination: PathBuf, size: u64) {
@@ -38,12 +45,54 @@ impl CopyPlan {
         self.directories.push(path);
     }
 
+    pub fn mark_skipped(&mut self, size: u64) {
+        self.skipped_files += 1;
+        self.skipped_size += size;
+    }
+
     pub fn sort_by_size_desc(&mut self) {
-        self.files.sort_by(|a, b|b.size.cmp(&a.size));
+        self.files.sort_by(|a, b| b.size.cmp(&a.size));
     }
 }
 
-pub async fn preprocess_file(source: &Path, destination: &Path) -> io::Result<CopyPlan> {
+pub async fn calculate_checksum(path: &Path) -> io::Result<u64> {
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut hasher = Xxh3::new(); // streaming xxh3 hasher
+    let mut buffer = vec![0u8; 128 * 1024];
+
+    loop {
+        let bytes_read = file.read(&mut buffer).await?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]); // no RAM growth
+    }
+
+    Ok(hasher.digest())
+}
+
+async fn should_skip_file(source: &Path, destination: &Path) -> io::Result<bool> {
+    let dest_metadata = match tokio::fs::metadata(destination).await {
+        Ok(meta) => meta,
+        Err(_) => return Ok(false),
+    };
+
+    let src_metadata = tokio::fs::metadata(source).await?;
+
+    if dest_metadata.len() != src_metadata.len() {
+        return Ok(false);
+    }
+    let src_checksum = calculate_checksum(source).await?;
+    let dest_checksum = calculate_checksum(destination).await?;
+
+    Ok(src_checksum == dest_checksum)
+}
+
+pub async fn preprocess_file(
+    source: &Path,
+    destination: &Path,
+    resume: bool,
+) -> io::Result<CopyPlan> {
     let metadata = tokio::fs::metadata(source).await?;
 
     if metadata.is_dir() {
@@ -55,26 +104,32 @@ pub async fn preprocess_file(source: &Path, destination: &Path) -> io::Result<Co
 
     let mut plan = CopyPlan::new();
 
-    if let Ok(dest_meta) = tokio::fs::metadata(destination).await {
+    let dest_path = if let Ok(dest_meta) = tokio::fs::metadata(destination).await {
         if dest_meta.is_dir() {
             let file_name = source.file_name().ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "Invalid source path")
             })?;
-            let dest_path = destination.join(file_name);
-            plan.add_file(source.to_path_buf(), dest_path, metadata.len());
-            return Ok(plan);
+            destination.join(file_name)
+        } else {
+            destination.to_path_buf()
         }
-    }
+    } else {
+        destination.to_path_buf()
+    };
 
-    plan.add_file(
-        source.to_path_buf(),
-        destination.to_path_buf(),
-        metadata.len(),
-    );
+    if resume && should_skip_file(source, &dest_path).await? {
+        plan.mark_skipped(metadata.len());
+    } else {
+        plan.add_file(source.to_path_buf(), dest_path, metadata.len());
+    }
     Ok(plan)
 }
 
-pub async fn preprocess_directory(source: &Path, destination: &Path) -> io::Result<CopyPlan> {
+pub async fn preprocess_directory(
+    source: &Path,
+    destination: &Path,
+    resume: bool,
+) -> io::Result<CopyPlan> {
     let mut plan = CopyPlan::new();
     let mut stack = vec![(source.to_path_buf(), destination.to_path_buf())];
 
@@ -88,8 +143,12 @@ pub async fn preprocess_directory(source: &Path, destination: &Path) -> io::Resu
 
             if metadata.is_dir() {
                 stack.push((src_path, dest_path));
-            } else if metadata.is_file() {
-                plan.add_file(src_path, dest_path, metadata.len());
+            } else {
+                if resume && should_skip_file(&src_path, &dest_path).await? {
+                    plan.mark_skipped(metadata.len());
+                } else {
+                    plan.add_file(src_path, dest_path, metadata.len());
+                }
             }
         }
     }
@@ -97,7 +156,11 @@ pub async fn preprocess_directory(source: &Path, destination: &Path) -> io::Resu
     Ok(plan)
 }
 
-pub async fn preprocess_multiple(sources: &[PathBuf], destination: &Path) -> io::Result<CopyPlan> {
+pub async fn preprocess_multiple(
+    sources: &[PathBuf],
+    destination: &Path,
+    resume: bool,
+) -> io::Result<CopyPlan> {
     let dest_metadata = tokio::fs::metadata(destination).await?;
     if !dest_metadata.is_dir() {
         return Err(io::Error::new(
@@ -114,13 +177,19 @@ pub async fn preprocess_multiple(sources: &[PathBuf], destination: &Path) -> io:
         let dest_path = destination.join(file_name);
 
         if metadata.is_dir() {
-            let dir_plan = preprocess_directory(source, &dest_path).await?;
+            let dir_plan = preprocess_directory(source, &dest_path, resume).await?;
             plan.files.extend(dir_plan.files);
             plan.directories.extend(dir_plan.directories);
             plan.total_size += dir_plan.total_size;
             plan.total_files += dir_plan.total_files;
+            plan.skipped_files += dir_plan.skipped_files;
+            plan.skipped_size += dir_plan.skipped_size;
         } else {
-            plan.add_file(source.clone(), dest_path, metadata.len());
+            if resume && should_skip_file(source, &dest_path).await? {
+                plan.mark_skipped(metadata.len());
+            } else {
+                plan.add_file(source.clone(), dest_path, metadata.len());
+            }
         }
     }
     plan.sort_by_size_desc();
