@@ -27,4 +27,11 @@ pub struct CLIArgs {
         help = "Continue copying by skipping files that are already complete"
     )]
     pub continue_copy: bool,
+
+    #[arg(
+        short = 'f',
+        long,
+        help = "if an existing destination file cannot be opened, remove it and try again"
+    )]
+    pub force: bool,
 }

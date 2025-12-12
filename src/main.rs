@@ -19,6 +19,7 @@ async fn main() {
             args.recursive,
             args.concurrency,
             args.continue_copy,
+            args.force,
         )
         .await
     } else {
@@ -28,6 +29,7 @@ async fn main() {
             style,
             args.concurrency,
             args.continue_copy,
+            args.force,
         )
         .await
     };

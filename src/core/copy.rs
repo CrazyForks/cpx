@@ -17,6 +17,7 @@ pub async fn copy(
     recursive: bool,
     concurrency: usize,
     resume: bool,
+    force: bool,
 ) -> io::Result<()> {
     let metadata_src = tokio::fs::metadata(source).await?;
 
@@ -50,7 +51,7 @@ pub async fn copy(
             plan.skipped_files, plan.skipped_size
         );
     }
-    execute_copy(plan, style, concurrency).await
+    execute_copy(plan, style, concurrency, force).await
 }
 
 pub async fn multiple_copy(
@@ -59,6 +60,7 @@ pub async fn multiple_copy(
     style: ProgressBarStyle,
     concurrency: usize,
     resume: bool,
+    force: bool,
 ) -> io::Result<()> {
     let plan = preprocess_multiple(&sources, &destination, resume).await?;
     if plan.skipped_files > 0 {
@@ -67,13 +69,14 @@ pub async fn multiple_copy(
             plan.skipped_files, plan.skipped_size
         );
     }
-    execute_copy(plan, style, concurrency).await
+    execute_copy(plan, style, concurrency, force).await
 }
 
 async fn execute_copy(
     plan: CopyPlan,
     style: ProgressBarStyle,
     concurrency: usize,
+    force: bool,
 ) -> io::Result<()> {
     for dir in &plan.directories {
         if let Err(e) = tokio::fs::create_dir_all(dir).await {
@@ -127,6 +130,7 @@ async fn execute_copy(
                 file_task.size,
                 &pb,
                 overall.as_ref(),
+                force,
             )
             .await;
 
@@ -174,9 +178,17 @@ async fn copy_core(
     file_size: u64,
     file_pb: &ProgressBar,
     overall_pb: Option<&ProgressBar>,
+    force: bool,
 ) -> io::Result<()> {
     let src_file = tokio::fs::File::open(source).await?;
-    let dest_file = tokio::fs::File::create(destination).await?;
+    let dest_file = match tokio::fs::File::create(destination).await {
+        Ok(file) => file,
+        Err(_e) if force => {
+            let _ = tokio::fs::remove_file(destination).await;
+            tokio::fs::File::create(destination).await?
+        }
+        Err(e) => return Err(e),
+    };
 
     let mut src_file = BufReader::new(src_file);
     let mut dest_file = BufWriter::new(dest_file);
