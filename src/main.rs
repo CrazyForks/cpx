@@ -1,7 +1,8 @@
 use clap::Parser;
-use cpx::cli::args::{CLIArgs, CopyOptions};
+use cpx::cli::args::CLIArgs;
 use cpx::core::copy::{copy, multiple_copy};
 use cpx::utility::progress_bar::ProgressBarStyle;
+use std::process;
 
 #[tokio::main]
 async fn main() {
@@ -11,11 +12,17 @@ async fn main() {
         Some("detailed") => ProgressBarStyle::Detailed,
         _ => ProgressBarStyle::Default,
     };
-    let options = CopyOptions::from(&args);
-    let result = if args.sources.len() == 1 {
-        copy(&args.sources[0], &args.destination, style, &options).await
+    let (sources, destination, options) = match args.validate() {
+        Ok(validated) => validated,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            process::exit(1);
+        }
+    };
+    let result = if sources.len() == 1 {
+        copy(&sources[0], &destination, style, &options).await
     } else {
-        multiple_copy(args.sources, args.destination, style, &options).await
+        multiple_copy(sources, destination, style, &options).await
     };
     match result {
         Ok(_) => (),

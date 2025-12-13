@@ -5,8 +5,19 @@ use std::path::PathBuf;
 pub struct CLIArgs {
     #[arg(required = true)]
     pub sources: Vec<PathBuf>,
-    #[arg(required = true)]
-    pub destination: PathBuf,
+
+    /// Destination path (used without -t/--target-directory)
+    #[arg(last = true)]
+    pub destination: Option<PathBuf>,
+
+    #[arg(
+        short = 't',
+        long = "target-directory",
+        value_name = "DIRECTORY",
+        conflicts_with = "destination",
+        help = "copy all SOURCE arguments into DIRECTORY"
+    )]
+    pub target_directory: Option<PathBuf>,
 
     #[arg(short, long, help = "Progress bar style: default, minimal, detailed")]
     pub style: Option<String>,
@@ -62,5 +73,23 @@ impl From<&CLIArgs> for CopyOptions {
             interactive: cli.interactive,
             parents: cli.parents,
         }
+    }
+}
+
+impl CLIArgs {
+    pub fn validate(self) -> Result<(Vec<PathBuf>, PathBuf, CopyOptions), String> {
+        let options = CopyOptions::from(&self);
+
+        let destination = if let Some(target) = self.target_directory {
+            target
+        } else if let Some(dest) = self.destination {
+            dest
+        } else {
+            return Err(
+                "Missing destination: specify last argument or use --target-directory".to_string(),
+            );
+        };
+
+        Ok((self.sources, destination, options))
     }
 }
