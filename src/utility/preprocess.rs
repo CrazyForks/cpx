@@ -1,3 +1,4 @@
+use super::helper::with_parents;
 use std::path::{Path, PathBuf};
 use tokio::io;
 use tokio::io::AsyncReadExt;
@@ -101,6 +102,7 @@ pub async fn preprocess_file(
     source: &Path,
     destination: &Path,
     resume: bool,
+    parents: bool,
 ) -> io::Result<CopyPlan> {
     let metadata = tokio::fs::metadata(source).await?;
 
@@ -113,19 +115,42 @@ pub async fn preprocess_file(
 
     let mut plan = CopyPlan::new();
 
-    let dest_path = if let Ok(dest_meta) = tokio::fs::metadata(destination).await {
+    let dest_path = if parents {
+        let dest_meta = tokio::fs::metadata(destination).await.map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "Destination '{}' does not exist, with --parents destination must be a directory",
+                destination.display()
+            ),
+        )
+    })?;
+
+        if !dest_meta.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Destination '{}' is not a directory, with --parents destination must be a directory",
+                    destination.display()
+                ),
+            ));
+        }
+
+        with_parents(destination, source)
+    } else if let Ok(dest_meta) = tokio::fs::metadata(destination).await {
         if dest_meta.is_dir() {
-            let file_name = source.file_name().ok_or_else(|| {
+            destination.join(source.file_name().ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "Invalid source path")
-            })?;
-            destination.join(file_name)
+            })?)
         } else {
             destination.to_path_buf()
         }
     } else {
         destination.to_path_buf()
     };
-
+    if let Some(parent) = dest_path.parent() {
+        plan.add_directory(parent.to_path_buf());
+    }
     if resume && should_skip_file(source, &dest_path).await? {
         plan.mark_skipped(metadata.len());
     } else {
@@ -138,9 +163,18 @@ pub async fn preprocess_directory(
     source: &Path,
     destination: &Path,
     resume: bool,
+    parents: bool,
 ) -> io::Result<CopyPlan> {
     let mut plan = CopyPlan::new();
-    let mut stack = vec![(source.to_path_buf(), destination.to_path_buf())];
+    let root_destination =
+        if parents {
+            with_parents(destination, source)
+        } else {
+            destination.join(source.file_name().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "Invalid source path")
+            })?)
+        };
+    let mut stack = vec![(source.to_path_buf(), root_destination)];
 
     while let Some((src_dir, dest_dir)) = stack.pop() {
         plan.add_directory(dest_dir.clone());
@@ -169,6 +203,7 @@ pub async fn preprocess_multiple(
     sources: &[PathBuf],
     destination: &Path,
     resume: bool,
+    parents: bool,
 ) -> io::Result<CopyPlan> {
     let dest_metadata = tokio::fs::metadata(destination).await?;
     if !dest_metadata.is_dir() {
@@ -177,16 +212,23 @@ pub async fn preprocess_multiple(
             format!("Destination '{}' is not a directory", destination.display()),
         ));
     }
+
     let mut plan = CopyPlan::new();
     for source in sources {
         let metadata = tokio::fs::metadata(source).await?;
         let file_name = source
             .file_name()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid source path"))?;
-        let dest_path = destination.join(file_name);
-
+        let dest_path = if parents {
+            with_parents(destination, source)
+        } else {
+            destination.join(file_name)
+        };
+        if let Some(parent) = dest_path.parent() {
+            plan.add_directory(parent.to_path_buf());
+        }
         if metadata.is_dir() {
-            let dir_plan = preprocess_directory(source, &dest_path, resume).await?;
+            let dir_plan = preprocess_directory(source, &dest_path, resume, parents).await?;
             plan.files.extend(dir_plan.files);
             plan.directories.extend(dir_plan.directories);
             plan.total_size += dir_plan.total_size;

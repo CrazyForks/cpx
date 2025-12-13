@@ -30,24 +30,18 @@ pub async fn copy(
             ));
         }
 
-        let final_destination = if let Ok(dest_meta) = tokio::fs::metadata(destination).await {
+        if let Ok(dest_meta) = tokio::fs::metadata(destination).await {
             if dest_meta.is_file() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("'{}' is a file, expected directory", destination.display()),
                 ));
             }
-            let dir_name = source.file_name().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "Invalid source directory name")
-            })?;
-            destination.join(dir_name)
-        } else {
-            destination.to_path_buf()
-        };
+        }
 
-        preprocess_directory(source, &final_destination, options.resume).await?
+        preprocess_directory(source, destination, options.resume, options.parents).await?
     } else {
-        preprocess_file(source, destination, options.resume).await?
+        preprocess_file(source, destination, options.resume, options.parents).await?
     };
     if plan.skipped_files > 0 {
         eprintln!(
@@ -65,7 +59,7 @@ pub async fn multiple_copy(
     style: ProgressBarStyle,
     options: &CopyOptions,
 ) -> io::Result<()> {
-    let plan = preprocess_multiple(&sources, &destination, options.resume).await?;
+    let plan = preprocess_multiple(&sources, &destination, options.resume, options.parents).await?;
     if plan.skipped_files > 0 {
         eprintln!("Skipping {} files that already exist", plan.skipped_files);
     }

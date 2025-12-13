@@ -37,6 +37,9 @@ pub struct CLIArgs {
 
     #[arg(short = 'i', long, help = "prompt before overwrite")]
     pub interactive: bool,
+
+    #[arg(long, help = "use full source file name under DIRECTORY")]
+    pub parents: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -46,6 +49,7 @@ pub struct CopyOptions {
     pub resume: bool,
     pub force: bool,
     pub interactive: bool,
+    pub parents: bool,
 }
 
 impl From<&CLIArgs> for CopyOptions {
@@ -56,6 +60,7 @@ impl From<&CLIArgs> for CopyOptions {
             resume: cli.continue_copy,
             force: cli.force,
             interactive: cli.interactive,
+            parents: cli.parents,
         }
     }
 }
