@@ -4,7 +4,7 @@ use crate::utility::preprocess::{
     CopyPlan, preprocess_directory, preprocess_file, preprocess_multiple,
 };
 use crate::utility::preserve::{self, PreserveAttr};
-use crate::utility::progress_bar::ProgressBarStyle;
+use crate::utility::progress_bar::{ProgressBarStyle, apply_overall};
 use indicatif::{MultiProgress, ProgressBar};
 use std::io::{self};
 use std::sync::Arc;
@@ -80,7 +80,7 @@ async fn execute_copy(
     let overall_pb = if plan.total_files >= 1 && !options.interactive {
         let pb = multi_progress.add(ProgressBar::new(plan.total_size));
         pb.set_message(format!("Copying {} files", plan.total_files));
-        style.apply(&pb);
+        apply_overall(&pb);
         Some(pb)
     } else {
         None
@@ -115,7 +115,7 @@ async fn execute_copy(
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "unknown".to_string());
-                pb.set_message(format!("{}", file_name));
+                pb.set_message(format!(" {}", file_name));
                 style_cloned.apply(&pb);
                 pb
             };
@@ -152,7 +152,7 @@ async fn execute_copy(
 
     if let Some(pb) = overall_pb {
         if errors.is_empty() {
-            pb.finish_with_message(format!("Copied {} files successfully", plan.total_files));
+            pb.finish_and_clear();
         } else {
             pb.abandon_with_message("Copy completed with errors");
         }

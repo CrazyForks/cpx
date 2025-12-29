@@ -9,7 +9,6 @@ async fn main() {
     let args = CLIArgs::parse();
     let style = match args.style.as_deref() {
         Some("minimal") => ProgressBarStyle::Minimal,
-        Some("detailed") => ProgressBarStyle::Detailed,
         _ => ProgressBarStyle::Default,
     };
     let (sources, destination, options) = match args.validate() {
