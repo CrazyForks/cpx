@@ -9,7 +9,7 @@ use indicatif::{MultiProgress, ProgressBar};
 use std::io::{self};
 use std::sync::Arc;
 use std::{path::Path, path::PathBuf};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Semaphore;
 pub async fn copy(
     source: &Path,
@@ -192,17 +192,28 @@ async fn copy_core(
         Err(e) => return Err(e),
     };
 
-    let mut src_file = BufReader::new(src_file);
-    let mut dest_file = BufWriter::new(dest_file);
+    let buffer_size: usize = if file_size < 1024 * 1024 {
+        64 * 1024
+    } else if file_size < 8 * 1024 * 1024 {
+        256 * 1024
+    } else if file_size < 64 * 1024 * 1024 {
+        512 * 1024
+    } else if file_size < 512 * 1024 * 1024 {
+        1024 * 1024
+    } else {
+        4 * 1024 * 1024
+    };
 
-    const BUFFER_SIZE: usize = 512 * 1024;
-    let mut buffer = vec![0u8; BUFFER_SIZE];
+    let mut src_file = tokio::io::BufReader::with_capacity(buffer_size, src_file);
+    let mut dest_file = tokio::io::BufWriter::with_capacity(buffer_size, dest_file);
+
+    let mut buffer = vec![0u8; buffer_size];
 
     const MAX_UPDATES: u64 = 200;
-    let update_threshold = if file_size > MAX_UPDATES * BUFFER_SIZE as u64 {
+    let update_threshold = if file_size > MAX_UPDATES * buffer_size as u64 {
         file_size / MAX_UPDATES
     } else {
-        BUFFER_SIZE as u64
+        buffer_size as u64
     };
 
     let mut accumulated_bytes = 0u64;
