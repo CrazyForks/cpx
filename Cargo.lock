@@ -232,7 +232,6 @@ dependencies = [
  "libc",
  "nix",
  "predicates",
- "rustix",
  "tempfile",
  "tokio",
  "tokio-test",
