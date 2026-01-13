@@ -74,7 +74,7 @@ async fn execute_copy(
     options: &CopyOptions,
 ) -> io::Result<()> {
     if !options.attributes_only {
-        create_directories(&plan.directories).await?;
+        create_directories(&plan.directories)?;
     } else {
         for dir_task in &plan.directories {
             if let Some(src) = &dir_task.source {
