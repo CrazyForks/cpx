@@ -245,7 +245,7 @@ pub fn preprocess_directory(
         } else if metadata.is_file() {
             if let Some(mode) = options.symbolic_link {
                 let use_absolute = should_use_absolute(source, mode);
-                plan.add_symlink(source.to_path_buf(), dest_path, use_absolute);
+                plan.add_symlink(src_path.to_path_buf(), dest_path, use_absolute);
             } else if options.resume && should_skip_file(&src_path, &dest_path)? {
                 plan.mark_skipped(metadata.len());
             } else {
