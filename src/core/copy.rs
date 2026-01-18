@@ -1,7 +1,7 @@
 use crate::cli::args::CopyOptions;
 #[cfg(target_os = "linux")]
 use crate::core::fast_copy::fast_copy;
-use crate::utility::helper::{create_directories, prompt_overwrite};
+use crate::utility::helper::{create_directories, create_symlink, prompt_overwrite};
 use crate::utility::preprocess::{
     CopyPlan, preprocess_directory, preprocess_file, preprocess_multiple,
 };
@@ -91,6 +91,23 @@ async fn execute_copy(
                     .await?;
             }
         }
+    }
+
+    if options.symbolic_link.is_some() {
+        for symlink_task in &plan.symlinks {
+            if let Err(e) = create_symlink(symlink_task).await {
+                eprintln!(
+                    "Failed to create symlink {:?} -> {:?}: {}",
+                    symlink_task.destination, symlink_task.source, e
+                );
+                return Err(e);
+            }
+        }
+
+        if plan.total_symlinks > 0 {
+            println!("Created {} symbolic links", plan.total_symlinks);
+        }
+        return Ok(());
     }
 
     let overall_pb = if plan.total_files >= 1 && !options.interactive && !options.attributes_only {

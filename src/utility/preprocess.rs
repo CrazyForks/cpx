@@ -1,5 +1,5 @@
 use super::helper::with_parents;
-use crate::cli::args::CopyOptions;
+use crate::cli::args::{CopyOptions, SymlinkMode};
 use jwalk::WalkDir;
 use std::fs::Metadata;
 use std::io;
@@ -19,12 +19,20 @@ pub struct DirectoryTask {
     pub destination: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub struct SymlinkTask {
+    pub source: PathBuf,
+    pub destination: PathBuf,
+    pub use_absolute: bool,
+}
 #[derive(Debug)]
 pub struct CopyPlan {
     pub files: Vec<FileTask>,
     pub directories: Vec<DirectoryTask>,
+    pub symlinks: Vec<SymlinkTask>,
     pub total_size: u64,
     pub total_files: usize,
+    pub total_symlinks: usize,
     pub skipped_files: usize,
     pub skipped_size: u64,
 }
@@ -40,8 +48,10 @@ impl CopyPlan {
         Self {
             files: Vec::new(),
             directories: Vec::new(),
+            symlinks: Vec::new(),
             total_size: 0,
             total_files: 0,
+            total_symlinks: 0,
             skipped_files: 0,
             skipped_size: 0,
         }
@@ -62,6 +72,14 @@ impl CopyPlan {
             destination,
         });
     }
+    pub fn add_symlink(&mut self, source: PathBuf, destination: PathBuf, use_absolute: bool) {
+        self.symlinks.push(SymlinkTask {
+            source,
+            destination,
+            use_absolute,
+        });
+        self.total_symlinks += 1;
+    }
 
     pub fn mark_skipped(&mut self, size: u64) {
         self.skipped_files += 1;
@@ -70,6 +88,14 @@ impl CopyPlan {
 
     pub fn sort_files_descending(&mut self) {
         self.files.sort_by(|a, b| b.size.cmp(&a.size));
+    }
+}
+
+fn should_use_absolute(source: &Path, mode: SymlinkMode) -> bool {
+    match mode {
+        SymlinkMode::Absolute => true,
+        SymlinkMode::Relative => false,
+        SymlinkMode::Auto => source.is_absolute(),
     }
 }
 
@@ -169,7 +195,10 @@ pub fn preprocess_file(
     {
         plan.add_directory(None, parent.to_path_buf());
     }
-    if options.resume && should_skip_file(source, &dest_path)? {
+    if let Some(mode) = options.symbolic_link {
+        let use_absolute = should_use_absolute(source, mode);
+        plan.add_symlink(source.to_path_buf(), dest_path, use_absolute);
+    } else if options.resume && should_skip_file(source, &dest_path)? {
         plan.mark_skipped(source_metadata.len());
     } else {
         plan.add_file(source.to_path_buf(), dest_path, source_metadata.len());
@@ -214,7 +243,10 @@ pub fn preprocess_directory(
         if metadata.is_dir() {
             plan.add_directory(Some(src_path.to_path_buf()), dest_path);
         } else if metadata.is_file() {
-            if options.resume && should_skip_file(&src_path, &dest_path)? {
+            if let Some(mode) = options.symbolic_link {
+                let use_absolute = should_use_absolute(source, mode);
+                plan.add_symlink(source.to_path_buf(), dest_path, use_absolute);
+            } else if options.resume && should_skip_file(&src_path, &dest_path)? {
                 plan.mark_skipped(metadata.len());
             } else {
                 plan.add_file(src_path.to_path_buf(), dest_path, metadata.len());
@@ -266,8 +298,10 @@ pub fn preprocess_multiple(
             {
                 plan.add_directory(None, parent.to_path_buf());
             }
-
-            if options.resume && should_skip_file(source, &dest_path)? {
+            if let Some(mode) = options.symbolic_link {
+                let use_absolute = should_use_absolute(source, mode);
+                plan.add_symlink(source.to_path_buf(), dest_path, use_absolute);
+            } else if options.resume && should_skip_file(source, &dest_path)? {
                 plan.mark_skipped(metadata.len());
             } else {
                 plan.add_file(source.clone(), dest_path, metadata.len());
@@ -326,5 +360,183 @@ mod tests {
 
         assert_eq!(plan.total_files, 3);
         assert!(!plan.directories.is_empty());
+    }
+    #[test]
+    fn test_should_use_absolute_auto_mode() {
+        let abs_path = Path::new("/absolute/path");
+        let rel_path = Path::new("relative/path");
+
+        assert!(should_use_absolute(abs_path, SymlinkMode::Auto));
+        assert!(!should_use_absolute(rel_path, SymlinkMode::Auto));
+    }
+
+    #[test]
+    fn test_should_use_absolute_force_modes() {
+        let path = Path::new("any/path");
+
+        assert!(should_use_absolute(path, SymlinkMode::Absolute));
+        assert!(!should_use_absolute(path, SymlinkMode::Relative));
+    }
+
+    #[test]
+    fn test_preprocess_file_with_symlink_auto() {
+        let temp_dir = TempDir::new().unwrap();
+        let source = temp_dir.path().join("source.txt");
+        let dest_dir = temp_dir.path().join("dest");
+
+        create_test_file(&source, b"content").unwrap();
+        std_fs::create_dir(&dest_dir).unwrap();
+
+        let source_metadata = std_fs::metadata(&source).unwrap();
+        let dest_metadata = Some(std_fs::metadata(&dest_dir).unwrap());
+
+        let mut options = CopyOptions::none();
+        options.symbolic_link = Some(SymlinkMode::Auto);
+
+        let plan =
+            preprocess_file(&source, &dest_dir, &options, source_metadata, dest_metadata).unwrap();
+
+        assert_eq!(plan.total_files, 0);
+        assert_eq!(plan.total_symlinks, 1);
+        assert_eq!(plan.symlinks.len(), 1);
+
+        let symlink = &plan.symlinks[0];
+        assert_eq!(symlink.source, source);
+        assert_eq!(symlink.use_absolute, source.is_absolute());
+    }
+
+    #[test]
+    fn test_preprocess_file_with_symlink_absolute() {
+        let temp_dir = TempDir::new().unwrap();
+        let source = temp_dir.path().join("source.txt");
+        let dest_dir = temp_dir.path().join("dest");
+
+        create_test_file(&source, b"content").unwrap();
+        std_fs::create_dir(&dest_dir).unwrap();
+
+        let source_metadata = std_fs::metadata(&source).unwrap();
+        let dest_metadata = Some(std_fs::metadata(&dest_dir).unwrap());
+
+        let mut options = CopyOptions::none();
+        options.symbolic_link = Some(SymlinkMode::Absolute);
+
+        let plan =
+            preprocess_file(&source, &dest_dir, &options, source_metadata, dest_metadata).unwrap();
+
+        assert_eq!(plan.total_symlinks, 1);
+        assert!(plan.symlinks[0].use_absolute);
+    }
+
+    #[test]
+    fn test_preprocess_file_with_symlink_relative() {
+        let temp_dir = TempDir::new().unwrap();
+        let source = temp_dir.path().join("source.txt");
+        let dest_dir = temp_dir.path().join("dest");
+
+        create_test_file(&source, b"content").unwrap();
+        std_fs::create_dir(&dest_dir).unwrap();
+
+        let source_metadata = std_fs::metadata(&source).unwrap();
+        let dest_metadata = Some(std_fs::metadata(&dest_dir).unwrap());
+
+        let mut options = CopyOptions::none();
+        options.symbolic_link = Some(SymlinkMode::Relative);
+
+        let plan =
+            preprocess_file(&source, &dest_dir, &options, source_metadata, dest_metadata).unwrap();
+
+        assert_eq!(plan.total_symlinks, 1);
+        assert!(!plan.symlinks[0].use_absolute);
+    }
+
+    #[test]
+    fn test_preprocess_directory_with_symlinks() {
+        let temp_dir = TempDir::new().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        let dest_dir = temp_dir.path().join("dest");
+
+        std_fs::create_dir_all(&source_dir).unwrap();
+        create_test_file(&source_dir.join("file1.txt"), b"content1").unwrap();
+        create_test_file(&source_dir.join("file2.txt"), b"content2").unwrap();
+
+        let subdir = source_dir.join("subdir");
+        std_fs::create_dir_all(&subdir).unwrap();
+        create_test_file(&subdir.join("file3.txt"), b"content3").unwrap();
+
+        let mut options = CopyOptions::none();
+        options.recursive = true;
+        options.symbolic_link = Some(SymlinkMode::Auto);
+
+        let plan = preprocess_directory(&source_dir, &dest_dir, &options).unwrap();
+
+        assert_eq!(plan.total_files, 0);
+        assert_eq!(plan.total_symlinks, 3);
+        assert!(!plan.directories.is_empty());
+        assert_eq!(plan.symlinks.len(), 3);
+    }
+
+    #[test]
+    fn test_preprocess_multiple_with_symlinks() {
+        let temp_dir = TempDir::new().unwrap();
+        let dest_dir = temp_dir.path().join("dest");
+        std_fs::create_dir(&dest_dir).unwrap();
+
+        let file1 = temp_dir.path().join("file1.txt");
+        let file2 = temp_dir.path().join("file2.txt");
+
+        create_test_file(&file1, b"content1").unwrap();
+        create_test_file(&file2, b"content2").unwrap();
+
+        let sources = vec![file1.clone(), file2.clone()];
+
+        let mut options = CopyOptions::none();
+        options.symbolic_link = Some(SymlinkMode::Relative);
+
+        let plan = preprocess_multiple(&sources, &dest_dir, &options).unwrap();
+
+        assert_eq!(plan.total_files, 0);
+        assert_eq!(plan.total_symlinks, 2);
+        assert_eq!(plan.symlinks.len(), 2);
+
+        for symlink in &plan.symlinks {
+            assert!(!symlink.use_absolute);
+        }
+    }
+
+    #[test]
+    fn test_preprocess_file_normal_copy_mode() {
+        let temp_dir = TempDir::new().unwrap();
+        let source = temp_dir.path().join("source.txt");
+        let dest_dir = temp_dir.path().join("dest");
+
+        create_test_file(&source, b"content").unwrap();
+        std_fs::create_dir(&dest_dir).unwrap();
+
+        let source_metadata = std_fs::metadata(&source).unwrap();
+        let dest_metadata = Some(std_fs::metadata(&dest_dir).unwrap());
+
+        let options = CopyOptions::none(); // No symlink mode
+
+        let plan =
+            preprocess_file(&source, &dest_dir, &options, source_metadata, dest_metadata).unwrap();
+
+        assert_eq!(plan.total_files, 1);
+        assert_eq!(plan.total_symlinks, 0);
+        assert!(plan.symlinks.is_empty());
+    }
+
+    #[test]
+    fn test_copy_plan_add_symlink() {
+        let mut plan = CopyPlan::new();
+        let source = PathBuf::from("/source/file.txt");
+        let dest = PathBuf::from("/dest/file.txt");
+
+        plan.add_symlink(source.clone(), dest.clone(), true);
+
+        assert_eq!(plan.total_symlinks, 1);
+        assert_eq!(plan.symlinks.len(), 1);
+        assert_eq!(plan.symlinks[0].source, source);
+        assert_eq!(plan.symlinks[0].destination, dest);
+        assert!(plan.symlinks[0].use_absolute);
     }
 }

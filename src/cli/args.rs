@@ -1,7 +1,13 @@
 use crate::utility::preserve::PreserveAttr;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum SymlinkMode {
+    Auto,
+    Absolute,
+    Relative,
+}
 #[derive(Parser, Debug)]
 pub struct CLIArgs {
     #[arg(required = true)]
@@ -73,11 +79,14 @@ pub struct CLIArgs {
     pub remove_destination: bool,
 
     #[arg(
-        short = 's',
-        long = "symbolic-link",
-        help = "make symbolic links instead of copying"
-    )]
-    pub symbolic_link: bool,
+            short = 's',
+            long = "symbolic-link",
+            value_name = "MODE",
+            default_missing_value = "auto",
+            num_args = 0..=1,
+            help = "make symbolic links instead of copying (auto, absolute, or relative)"
+        )]
+    pub symbolic_link: Option<SymlinkMode>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -91,7 +100,7 @@ pub struct CopyOptions {
     pub preserve: PreserveAttr,
     pub attributes_only: bool,
     pub remove_destination: bool,
-    pub symbolic_link: bool,
+    pub symbolic_link: Option<SymlinkMode>,
 }
 
 impl CopyOptions {
@@ -106,7 +115,7 @@ impl CopyOptions {
             preserve: PreserveAttr::none(),
             attributes_only: false,
             remove_destination: false,
-            symbolic_link: false,
+            symbolic_link: None,
         }
     }
 }

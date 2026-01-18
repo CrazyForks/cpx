@@ -14,6 +14,7 @@ xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
 nix = { version = "0.30.1", features = ["zerocopy"] }
 jwalk = "0.8.1"
 num_cpus = "1.17.0"
+pathdiff = "0.2.3"
 
 
 [dev-dependencies]
