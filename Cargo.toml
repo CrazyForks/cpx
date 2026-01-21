@@ -16,7 +16,12 @@ num_cpus = "1.17.0"
 pathdiff = "0.2.3"
 reflink-copy = "0.1.28"
 rayon = "1.11.0"
+xattr = "1.6.1"
+selinux = {version = "0.5.3", optional = true}
 
+[features]
+default = []
+selinux-support = ["selinux"]
 
 [dev-dependencies]
 assert_cmd = "2.0"

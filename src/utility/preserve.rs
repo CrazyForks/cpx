@@ -97,6 +97,16 @@ pub fn apply_preserve_attrs(
     if attrs.ownership {
         preserve_ownership(destination, &src_metadata)?;
     }
+
+    #[cfg(unix)]
+    if attrs.xattr {
+        preserve_xattr(source, destination)?;
+    }
+
+    #[cfg(unix)]
+    if attrs.context {
+        preserve_context(source, destination)?;
+    }
     Ok(())
 }
 
@@ -151,6 +161,53 @@ fn preserve_ownership(destination: &Path, src_metadata: &std::fs::Metadata) -> i
     Ok(())
 }
 
+#[cfg(unix)]
+fn preserve_xattr(source: &Path, destination: &Path) -> io::Result<()> {
+    if !xattr::SUPPORTED_PLATFORM {
+        return Ok(());
+    }
+
+    let xattrs = match xattr::list(source) {
+        Ok(attrs) => attrs,
+        Err(e) => {
+            if e.kind() == io::ErrorKind::Unsupported {
+                return Ok(());
+            }
+            return Err(e);
+        }
+    };
+    for attr_name in xattrs {
+        if let Some(value) = xattr::get(source, &attr_name)? {
+            let _ = xattr::set(destination, &attr_name, &value);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(unix, feature = "selinux-support"))]
+pub fn preserve_context(source: &Path, destination: &Path) -> io::Result<()> {
+    use selinux;
+    if selinux::kernel_support() == selinux::KernelSupport::Unsupported {
+        return Ok(());
+    }
+
+    let context = selinux::SecurityContext::of_path(source, false, false)
+        .map_err(|e| std::io::Error::other(format!("Failed to get SELinux context: {}", e)))?;
+
+    let Some(context) = context else {
+        return Ok(());
+    };
+
+    context
+        .set_for_path(destination, false, false)
+        .map_err(|e| std::io::Error::other(format!("Failed to set SELinux context: {}", e)))?;
+
+    Ok(())
+}
+#[cfg(not(all(unix, feature = "selinux-support")))]
+pub fn preserve_context(_source: &Path, _destination: &Path) -> io::Result<()> {
+    Ok(()) // No-op when SELinux support is disabled
+}
 #[cfg(test)]
 mod tests {
     use super::*;
