@@ -10,7 +10,7 @@ pub fn fast_copy(
     destination: &Path,
     file_size: u64,
     overall_pb: Option<&ProgressBar>,
-    options: CopyOptions,
+    options: &CopyOptions,
 ) -> io::Result<bool> {
     let src_file = std::fs::File::open(source)?;
     if options.remove_destination {

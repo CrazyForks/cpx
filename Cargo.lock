@@ -278,6 +278,7 @@ dependencies = [
  "clap",
  "filetime",
  "futures",
+ "globset",
  "indicatif",
  "jwalk",
  "libc",

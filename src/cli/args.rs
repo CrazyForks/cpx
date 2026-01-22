@@ -1,4 +1,9 @@
-use crate::utility::{preserve::PreserveAttr, progress_bar::ProgressBarStyle};
+use crate::utility::{
+    exclude::{ExcludePattern, ExcludeRules, build_exclude_rules},
+    preserve::PreserveAttr,
+    progress_bar::ProgressBarStyle,
+};
+
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
@@ -160,9 +165,17 @@ pub struct CLIArgs {
         help = "control clone/CoW copies (auto, always, never)"
     )]
     pub reflink: Option<ReflinkMode>,
+
+    #[arg(
+        short = 'e',
+        long = "exclude",
+        value_name = "PATTERN",
+        help = "Exclude files matching pattern (can be specified multiple times, supports comma-separated values)"
+    )]
+    pub exclude: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct CopyOptions {
     pub recursive: bool,
     pub concurrency: usize,
@@ -179,6 +192,7 @@ pub struct CopyOptions {
     pub style: ProgressBarStyle,
     pub backup: Option<BackupMode>,
     pub reflink: Option<ReflinkMode>,
+    pub exclude_rules: Option<ExcludeRules>,
 }
 
 impl CopyOptions {
@@ -199,6 +213,7 @@ impl CopyOptions {
             style: ProgressBarStyle::Default,
             backup: None,
             reflink: None,
+            exclude_rules: None,
         }
     }
 }
@@ -226,6 +241,7 @@ impl From<&CLIArgs> for CopyOptions {
             style: cli.style,
             backup: cli.backup,
             reflink: cli.reflink,
+            exclude_rules: None,
         }
     }
 }
@@ -244,10 +260,32 @@ impl CLIArgs {
             _ => Err("only one of -P, -L, or -H may be specified".to_string()),
         }
     }
+    pub fn parse_exclude_patterns(&self) -> Result<Vec<ExcludePattern>, String> {
+        let mut patterns = Vec::new();
+        for pattern_str in &self.exclude {
+            for pattern in pattern_str.split(',') {
+                let trimmed = pattern.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if trimmed.contains("..") {
+                    return Err(format!(
+                        "Invalid exclude pattern '{}': parent directory references (..) are not allowed",
+                        trimmed
+                    ));
+                }
+                patterns.push(ExcludePattern::from_string(trimmed));
+            }
+        }
+        Ok(patterns)
+    }
+
     pub fn validate(mut self) -> Result<(Vec<PathBuf>, PathBuf, CopyOptions), String> {
         let follow_symlink = self.follow_symlink_mode()?;
         let mut options = CopyOptions::from(&self);
         options.follow_symlink = follow_symlink;
+        let exclude_patterns = self.parse_exclude_patterns()?;
+        options.exclude_rules = build_exclude_rules(exclude_patterns)?;
 
         if options.reflink.is_some() {
             if options.hard_link {
@@ -321,6 +359,7 @@ mod tests {
             dereference_command_line: false,
             backup: None,
             reflink: None,
+            exclude: Vec::new(),
         };
 
         let result = args.validate();
@@ -351,6 +390,7 @@ mod tests {
             dereference_command_line: false,
             backup: None,
             reflink: None,
+            exclude: Vec::new(),
         };
 
         let result = args.validate();
@@ -381,6 +421,7 @@ mod tests {
             dereference_command_line: false,
             backup: None,
             reflink: None,
+            exclude: Vec::new(),
         };
 
         let result = args.validate();
@@ -411,6 +452,7 @@ mod tests {
             dereference_command_line: false,
             backup: None,
             reflink: None,
+            exclude: Vec::new(),
         };
 
         let result = args.validate();

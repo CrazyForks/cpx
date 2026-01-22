@@ -1,4 +1,5 @@
 pub mod backup;
+pub mod exclude;
 pub mod helper;
 pub mod preprocess;
 pub mod preserve;

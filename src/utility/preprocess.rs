@@ -1,3 +1,4 @@
+use super::exclude::should_exclude;
 use super::helper::with_parents;
 use crate::cli::args::{CopyOptions, FollowSymlink, SymlinkMode};
 use jwalk::WalkDir;
@@ -191,10 +192,16 @@ pub fn should_skip_file(source: &Path, destination: &Path) -> io::Result<bool> {
 fn process_entry(
     plan: &mut CopyPlan,
     source: &Path,
+    source_root: &Path,
     dest_path: PathBuf,
     metadata: &Metadata,
     options: &CopyOptions,
 ) -> io::Result<()> {
+    if let Some(exclude_rules) = &options.exclude_rules
+        && should_exclude(source, source_root, exclude_rules)
+    {
+        return Ok(());
+    }
     if metadata.file_type().is_symlink() {
         if !matches!(options.follow_symlink, FollowSymlink::Dereference) {
             if let Some(mode) = options.symbolic_link {
@@ -220,6 +227,7 @@ fn process_entry(
 
 pub fn preprocess_file(
     source: &Path,
+    source_root: &Path,
     destination: &Path,
     options: &CopyOptions,
     source_metadata: Metadata,
@@ -268,22 +276,40 @@ pub fn preprocess_file(
         destination.to_path_buf()
     };
 
+    if let Some(exclude_rules) = &options.exclude_rules
+        && should_exclude(source, source_root, exclude_rules)
+    {
+        return Ok(plan);
+    }
     if options.parents
         && let Some(parent) = dest_path.parent()
     {
         plan.add_directory(None, parent.to_path_buf());
     }
 
-    process_entry(&mut plan, source, dest_path, &source_metadata, options)?;
+    process_entry(
+        &mut plan,
+        source,
+        source_root,
+        dest_path,
+        &source_metadata,
+        options,
+    )?;
     Ok(plan)
 }
 
 pub fn preprocess_directory(
     source: &Path,
+    source_root: &Path,
     destination: &Path,
     options: &CopyOptions,
 ) -> io::Result<CopyPlan> {
     let mut plan = CopyPlan::new();
+    if let Some(exclude_rules) = &options.exclude_rules
+        && should_exclude(source, source_root, exclude_rules)
+    {
+        return Ok(plan);
+    }
     let root_destination =
         if options.parents {
             with_parents(destination, source)
@@ -331,13 +357,19 @@ pub fn preprocess_directory(
                 "Failed to calculate relative path",
             )
         })?;
+
+        if let Some(exclude_rules) = &options.exclude_rules
+            && should_exclude(&src_path, source, exclude_rules)
+        {
+            continue;
+        }
         let dest_path = root_destination.join(relative);
         let metadata = entry.metadata()?;
 
         if metadata.is_dir() {
             plan.add_directory(Some(src_path.to_path_buf()), dest_path);
         } else {
-            process_entry(&mut plan, &src_path, dest_path, &metadata, options)?;
+            process_entry(&mut plan, &src_path, source, dest_path, &metadata, options)?;
         }
     }
 
@@ -369,9 +401,11 @@ pub fn preprocess_multiple(
         };
 
         if metadata.is_dir() {
-            let dir_plan = preprocess_directory(source, destination, options)?;
+            let dir_plan = preprocess_directory(source, source, destination, options)?;
             plan.merge(dir_plan);
         } else {
+            let source_root = source.parent().unwrap_or(Path::new("."));
+
             let dest_path = if options.parents {
                 with_parents(destination, source)
             } else {
@@ -386,7 +420,14 @@ pub fn preprocess_multiple(
                 plan.add_directory(None, parent.to_path_buf());
             }
 
-            process_entry(&mut plan, source, dest_path, &metadata, options)?;
+            process_entry(
+                &mut plan,
+                source,
+                source_root,
+                dest_path,
+                &metadata,
+                options,
+            )?;
         }
     }
 
@@ -438,7 +479,7 @@ mod tests {
         std_fs::create_dir_all(&subdir).unwrap();
         create_test_file(&subdir.join("file3.txt"), b"content3").unwrap();
         let options = CopyOptions::none();
-        let plan = preprocess_directory(&source_dir, &dest_dir, &options).unwrap();
+        let plan = preprocess_directory(&source_dir, &source_dir, &dest_dir, &options).unwrap();
 
         assert_eq!(plan.total_files, 3);
         assert!(!plan.directories.is_empty());
@@ -459,8 +500,15 @@ mod tests {
         let mut options = CopyOptions::none();
         options.symbolic_link = Some(SymlinkMode::Auto);
 
-        let plan =
-            preprocess_file(&source, &dest_dir, &options, source_metadata, dest_metadata).unwrap();
+        let plan = preprocess_file(
+            &source,
+            source.parent().unwrap_or(Path::new(".")),
+            &dest_dir,
+            &options,
+            source_metadata,
+            dest_metadata,
+        )
+        .unwrap();
 
         assert_eq!(plan.total_files, 0);
         assert_eq!(plan.total_symlinks, 1);
@@ -485,8 +533,15 @@ mod tests {
         let mut options = CopyOptions::none();
         options.symbolic_link = Some(SymlinkMode::Absolute);
 
-        let plan =
-            preprocess_file(&source, &dest_dir, &options, source_metadata, dest_metadata).unwrap();
+        let plan = preprocess_file(
+            &source,
+            source.parent().unwrap_or(Path::new(".")),
+            &dest_dir,
+            &options,
+            source_metadata,
+            dest_metadata,
+        )
+        .unwrap();
 
         assert_eq!(plan.total_symlinks, 1);
     }
@@ -506,8 +561,15 @@ mod tests {
         let mut options = CopyOptions::none();
         options.symbolic_link = Some(SymlinkMode::Relative);
 
-        let plan =
-            preprocess_file(&source, &dest_dir, &options, source_metadata, dest_metadata).unwrap();
+        let plan = preprocess_file(
+            &source,
+            source.parent().unwrap_or(Path::new(".")),
+            &dest_dir,
+            &options,
+            source_metadata,
+            dest_metadata,
+        )
+        .unwrap();
 
         assert_eq!(plan.total_symlinks, 1);
     }
@@ -530,7 +592,7 @@ mod tests {
         options.recursive = true;
         options.symbolic_link = Some(SymlinkMode::Auto);
 
-        let plan = preprocess_directory(&source_dir, &dest_dir, &options).unwrap();
+        let plan = preprocess_directory(&source_dir, &source_dir, &dest_dir, &options).unwrap();
 
         assert_eq!(plan.total_files, 0);
         assert_eq!(plan.total_symlinks, 3);
@@ -576,8 +638,15 @@ mod tests {
 
         let options = CopyOptions::none(); // No symlink mode
 
-        let plan =
-            preprocess_file(&source, &dest_dir, &options, source_metadata, dest_metadata).unwrap();
+        let plan = preprocess_file(
+            &source,
+            source.parent().unwrap_or(Path::new(".")),
+            &dest_dir,
+            &options,
+            source_metadata,
+            dest_metadata,
+        )
+        .unwrap();
 
         assert_eq!(plan.total_files, 1);
         assert_eq!(plan.total_symlinks, 0);

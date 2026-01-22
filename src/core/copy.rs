@@ -24,6 +24,7 @@ pub fn copy(source: &Path, destination: &Path, options: &CopyOptions) -> io::Res
         }
         FollowSymlink::NoDereference => std::fs::symlink_metadata(source)?,
     };
+    let source_root = source.parent().unwrap_or(source);
     let destination_metadata = std::fs::metadata(destination).ok();
 
     let plan = if source_metadata.is_dir() {
@@ -46,10 +47,11 @@ pub fn copy(source: &Path, destination: &Path, options: &CopyOptions) -> io::Res
             ));
         }
 
-        preprocess_directory(source, destination, options)?
+        preprocess_directory(source, source_root, destination, options)?
     } else {
         preprocess_file(
             source,
+            source_root,
             destination,
             options,
             source_metadata,
@@ -143,7 +145,7 @@ fn execute_copy(plan: CopyPlan, options: &CopyOptions) -> io::Result<()> {
                 overall_pb.as_deref(),
                 &completed_files,
                 plan.total_files,
-                *options,
+                options,
             )?;
         }
     } else {
@@ -163,7 +165,7 @@ fn execute_copy(plan: CopyPlan, options: &CopyOptions) -> io::Result<()> {
                         overall_pb.as_deref(),
                         &completed_files,
                         plan.total_files,
-                        *options,
+                        options,
                     )
                 })
                 .collect()
@@ -204,7 +206,7 @@ fn copy_core(
     overall_pb: Option<&ProgressBar>,
     completed_files: &AtomicUsize,
     total_files: usize,
-    options: CopyOptions,
+    options: &CopyOptions,
 ) -> io::Result<()> {
     if options.attributes_only {
         if std::fs::symlink_metadata(destination).is_err() {
@@ -252,7 +254,7 @@ fn copy_core(
                     if let Some(pb) = overall_pb {
                         pb.inc(file_size);
                     }
-                    update_progress(overall_pb, completed_files, total_files, &options);
+                    update_progress(overall_pb, completed_files, total_files, options);
                     if options.preserve != PreserveAttr::none() {
                         preserve::apply_preserve_attrs(source, destination, options.preserve)?;
                     }
@@ -268,7 +270,7 @@ fn copy_core(
 
     #[cfg(target_os = "linux")]
     if let Ok(true) = fast_copy(source, destination, file_size, overall_pb, options) {
-        update_progress(overall_pb, completed_files, total_files, &options);
+        update_progress(overall_pb, completed_files, total_files, options);
         if options.preserve != PreserveAttr::none() {
             preserve::apply_preserve_attrs(source, destination, options.preserve)?;
         }
@@ -333,7 +335,7 @@ fn copy_core(
 
     dest_file.flush()?;
 
-    update_progress(overall_pb, completed_files, total_files, &options);
+    update_progress(overall_pb, completed_files, total_files, options);
 
     if options.preserve != PreserveAttr::none() {
         preserve::apply_preserve_attrs(source, destination, options.preserve)?;
@@ -379,6 +381,7 @@ mod tests {
             parents: false,
             concurrency: 1,
             style: ProgressBarStyle::Default,
+            exclude_rules: None,
         }
     }
 
