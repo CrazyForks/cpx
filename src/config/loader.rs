@@ -1,25 +1,7 @@
 use super::schema::Config;
+use crate::error::{ConfigError, ConfigResult};
 use std::fs;
 use std::path::{Path, PathBuf};
-
-#[derive(Debug)]
-pub enum ConfigError {
-    Io(std::io::Error),
-    Parse(toml::de::Error),
-    InvalidValue(String),
-}
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigError::Io(e) => write!(f, "IO error: {}", e),
-            ConfigError::Parse(e) => write!(f, "Parse error: {}", e),
-            ConfigError::InvalidValue(msg) => write!(f, "Invalid config value: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
 
 pub fn find_config_files() -> Vec<PathBuf> {
     let mut paths = Vec::new();
@@ -43,7 +25,7 @@ pub fn find_config_files() -> Vec<PathBuf> {
     paths
 }
 
-pub fn load_config_file(path: &Path) -> Result<Config, ConfigError> {
+pub fn load_config_file(path: &Path) -> ConfigResult<Config> {
     let contents = fs::read_to_string(path).map_err(ConfigError::Io)?;
     let config: Config = toml::from_str(&contents).map_err(ConfigError::Parse)?;
     Ok(config)

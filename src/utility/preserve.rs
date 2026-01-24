@@ -1,3 +1,4 @@
+use crate::error::{PreserveError, PreserveResult};
 use std::io;
 use std::path::Path;
 
@@ -50,7 +51,7 @@ impl PreserveAttr {
         }
     }
 
-    pub fn from_string(s: &str) -> Result<Self, String> {
+    pub fn from_string(s: &str) -> PreserveResult<Self> {
         if s.is_empty() {
             return Ok(Self::default());
         }
@@ -71,7 +72,12 @@ impl PreserveAttr {
                 "context" => attr.context = true,
                 "links" => attr.links = true,
                 "all" => return Ok(Self::all()),
-                other => return Err(format!("Unknown attribute: {}", other)),
+                other => {
+                    return Err(PreserveError::UnsupportedAttribute(format!(
+                        "Unknown attribute: {}",
+                        other
+                    )));
+                }
             }
         }
 
@@ -83,29 +89,53 @@ pub fn apply_preserve_attrs(
     source: &Path,
     destination: &Path,
     attrs: PreserveAttr,
-) -> io::Result<()> {
-    let src_metadata = std::fs::metadata(source)?;
+) -> PreserveResult<()> {
+    let src_metadata = std::fs::metadata(source).map_err(|_e| PreserveError::FailedToPreserve {
+        path: source.to_path_buf(),
+        attribute: "metadata".to_string(),
+    })?;
     if attrs.timestamps {
-        preserve_timestamps(destination, &src_metadata)?;
+        preserve_timestamps(destination, &src_metadata).map_err(|_e| {
+            PreserveError::FailedToPreserve {
+                path: destination.to_path_buf(),
+                attribute: "timestamps".to_string(),
+            }
+        })?;
     }
     #[cfg(unix)]
     if attrs.mode {
-        preserve_mode(destination, &src_metadata)?;
+        preserve_mode(destination, &src_metadata).map_err(|_e| {
+            PreserveError::FailedToPreserve {
+                path: destination.to_path_buf(),
+                attribute: "mode".to_string(),
+            }
+        })?;
     }
 
     #[cfg(unix)]
     if attrs.ownership {
-        preserve_ownership(destination, &src_metadata)?;
+        preserve_ownership(destination, &src_metadata).map_err(|_e| {
+            PreserveError::FailedToPreserve {
+                path: destination.to_path_buf(),
+                attribute: "ownership".to_string(),
+            }
+        })?;
     }
 
     #[cfg(unix)]
     if attrs.xattr {
-        preserve_xattr(source, destination)?;
+        preserve_xattr(source, destination).map_err(|_e| PreserveError::FailedToPreserve {
+            path: destination.to_path_buf(),
+            attribute: "xattr".to_string(),
+        })?;
     }
 
     #[cfg(unix)]
     if attrs.context {
-        preserve_context(source, destination)?;
+        preserve_context(source, destination).map_err(|_e| PreserveError::FailedToPreserve {
+            path: destination.to_path_buf(),
+            attribute: "context".to_string(),
+        })?;
     }
     Ok(())
 }
@@ -271,7 +301,12 @@ mod tests {
     fn test_preserve_attr_from_string_invalid() {
         let result = PreserveAttr::from_string("mode,invalid_attr");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Unknown attribute"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unknown attribute")
+        );
     }
 
     #[test]

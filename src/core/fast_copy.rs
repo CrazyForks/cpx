@@ -1,10 +1,10 @@
+use crate::cli::args::CopyOptions;
+use crate::error::{CopyError, CopyResult};
 use indicatif::ProgressBar;
 use nix::fcntl::copy_file_range;
 use std::io;
 use std::path::Path;
 use std::sync::atomic::Ordering;
-
-use crate::cli::args::CopyOptions;
 
 pub fn fast_copy(
     source: &Path,
@@ -12,22 +12,38 @@ pub fn fast_copy(
     file_size: u64,
     overall_pb: Option<&ProgressBar>,
     options: &CopyOptions,
-) -> io::Result<bool> {
-    let src_file = std::fs::File::open(source)?;
+) -> CopyResult<bool> {
+    let src_file = std::fs::File::open(source).map_err(|e| CopyError::CopyFailed {
+        source: source.to_path_buf(),
+        destination: destination.to_path_buf(),
+        reason: format!("Failed to open source file: {}", e),
+    })?;
     if options.remove_destination {
         let exists = std::fs::exists(destination).unwrap_or(false);
 
         if exists {
-            std::fs::remove_file(destination)?;
+            std::fs::remove_file(destination).map_err(|e| CopyError::CopyFailed {
+                source: source.to_path_buf(),
+                destination: destination.to_path_buf(),
+                reason: format!("Failed to remove destination: {}", e),
+            })?;
         }
     }
     let dest_file = match std::fs::File::create(destination) {
         Ok(file) => file,
         Err(_e) if options.force => {
-            let _ = std::fs::remove_file(destination);
-            std::fs::File::create(destination)?
+            let _ = std::fs::remove_file(destination).map_err(|e| CopyError::CopyFailed {
+                source: source.to_path_buf(),
+                destination: destination.to_path_buf(),
+                reason: format!("Failed to remove destination: {}", e),
+            });
+            std::fs::File::create(destination).map_err(|e| CopyError::CopyFailed {
+                source: source.to_path_buf(),
+                destination: destination.to_path_buf(),
+                reason: format!("Failed to create destination: {}", e),
+            })?
         }
-        Err(e) => return Err(e),
+        Err(e) => return Err(CopyError::from(e)),
     };
     const TARGET_UPDATES: u64 = 128;
     const MIN_CHUNK: usize = 4 * 1024 * 1024;
@@ -46,10 +62,10 @@ pub fn fast_copy(
             } else {
                 eprintln!("Cleaned up incomplete file: {}", destination.display());
             }
-            return Err(io::Error::new(
+            return Err(CopyError::Io(io::Error::new(
                 io::ErrorKind::Interrupted,
                 "Operation aborted by user",
-            ));
+            )));
         }
 
         let to_copy = std::cmp::min(chunk_size, (file_size - total_copied) as usize);

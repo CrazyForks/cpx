@@ -1,19 +1,30 @@
 use crate::cli::args::BackupMode;
+use crate::error::{CopyError, CopyResult};
 use std::io;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_SUFFIX: &str = "~";
 
-pub fn generate_backup_path(destination: &Path, mode: BackupMode) -> io::Result<PathBuf> {
+pub fn generate_backup_path(destination: &Path, mode: BackupMode) -> CopyResult<PathBuf> {
     match mode {
         BackupMode::None => Ok(destination.to_path_buf()),
         BackupMode::Simple => Ok(add_suffix(destination)),
         BackupMode::Numbered => {
-            let max_number = find_max_backup_number(destination)?;
+            let max_number =
+                find_max_backup_number(destination).map_err(|e| CopyError::CopyFailed {
+                    source: PathBuf::new(),
+                    destination: destination.to_path_buf(),
+                    reason: format!("Failed to find backup number: {}", e),
+                })?;
             Ok(format_numbered_backup(destination, max_number + 1))
         }
         BackupMode::Existing => {
-            let max_number = find_max_backup_number(destination)?;
+            let max_number =
+                find_max_backup_number(destination).map_err(|e| CopyError::CopyFailed {
+                    source: PathBuf::new(),
+                    destination: destination.to_path_buf(),
+                    reason: format!("Failed to find backup number: {}", e),
+                })?;
             if max_number > 0 {
                 Ok(format_numbered_backup(destination, max_number + 1))
             } else {
@@ -61,8 +72,12 @@ fn format_numbered_backup(path: &Path, number: u32) -> PathBuf {
     PathBuf::from(path_str)
 }
 
-pub fn create_backup(destination: &Path, backup_path: &PathBuf) -> io::Result<()> {
-    std::fs::rename(destination, backup_path)
+pub fn create_backup(destination: &Path, backup_path: &PathBuf) -> CopyResult<()> {
+    std::fs::rename(destination, backup_path).map_err(|e| CopyError::CopyFailed {
+        source: destination.to_path_buf(),
+        destination: backup_path.clone(),
+        reason: format!("Failed to create backup: {}", e),
+    })
 }
 #[cfg(test)]
 mod tests {

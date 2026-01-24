@@ -1,3 +1,4 @@
+use crate::error::{ExcludeError, ExcludeResult};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::path::Component;
 use std::{
@@ -38,7 +39,7 @@ impl ExcludePattern {
     }
 }
 
-pub fn parse_exclude_pattern_list(input: &str) -> Result<Vec<ExcludePattern>, String> {
+pub fn parse_exclude_pattern_list(input: &str) -> ExcludeResult<Vec<ExcludePattern>> {
     let mut patterns = Vec::new();
 
     for raw in input.split(',') {
@@ -50,10 +51,10 @@ pub fn parse_exclude_pattern_list(input: &str) -> Result<Vec<ExcludePattern>, St
         let path = Path::new(trimmed);
         for component in path.components() {
             if matches!(component, Component::ParentDir) {
-                return Err(format!(
-                    "Invalid exclude pattern '{}': parent directory references (..) are not allowed",
+                return Err(ExcludeError::InvalidPattern(format!(
+                    "parent directory references (..) are not allowed in pattern '{}'",
                     trimmed
-                ));
+                )));
             }
         }
 
@@ -63,7 +64,7 @@ pub fn parse_exclude_pattern_list(input: &str) -> Result<Vec<ExcludePattern>, St
     Ok(patterns)
 }
 
-pub fn build_exclude_rules(patterns: Vec<ExcludePattern>) -> Result<Option<ExcludeRules>, String> {
+pub fn build_exclude_rules(patterns: Vec<ExcludePattern>) -> ExcludeResult<Option<ExcludeRules>> {
     if patterns.is_empty() {
         return Ok(None);
     }
@@ -81,8 +82,9 @@ pub fn build_exclude_rules(patterns: Vec<ExcludePattern>) -> Result<Option<Exclu
                 basenames.insert(name);
             }
             ExcludePattern::GlobPattern(pattern) => {
-                let glob = Glob::new(&pattern)
-                    .map_err(|e| format!("Invalid glob '{}': {}", pattern, e))?;
+                let glob = Glob::new(&pattern).map_err(|e| {
+                    ExcludeError::InvalidPattern(format!("Invalid glob '{}': {}", pattern, e))
+                })?;
                 glob_builder.add(glob);
                 has_globs = true;
             }
@@ -90,11 +92,7 @@ pub fn build_exclude_rules(patterns: Vec<ExcludePattern>) -> Result<Option<Exclu
     }
     absolute_paths.sort_unstable_by_key(|b| std::cmp::Reverse(b.as_os_str().len()));
     let glob_set = if has_globs {
-        Some(
-            glob_builder
-                .build()
-                .map_err(|e| format!("Glob build failed: {}", e))?,
-        )
+        Some(glob_builder.build()?)
     } else {
         None
     };

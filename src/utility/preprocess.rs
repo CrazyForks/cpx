@@ -1,6 +1,7 @@
 use super::exclude::should_exclude;
 use super::helper::with_parents;
 use crate::cli::args::{CopyOptions, FollowSymlink, SymlinkMode};
+use crate::error::{CopyError, CopyResult};
 use jwalk::WalkDir;
 use std::fs::Metadata;
 use std::io;
@@ -232,35 +233,36 @@ pub fn preprocess_file(
     options: &CopyOptions,
     source_metadata: Metadata,
     destination_metadata: Option<Metadata>,
-) -> io::Result<CopyPlan> {
+) -> CopyResult<CopyPlan> {
     if source_metadata.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("'{}' is a directory", source.display()),
-        ));
+        return Err(CopyError::CopyFailed {
+            source: source.to_path_buf(),
+            destination: destination.to_path_buf(),
+            reason: format!("'{}' is a directory", source.display()),
+        });
     }
 
     let mut plan = CopyPlan::new();
 
     let dest_path = if options.parents {
-        let dest_meta = destination_metadata.ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "Destination '{}' does not exist, with --parents destination must be a directory",
-                    destination.display()
-                ),
-            )
+        let dest_meta = destination_metadata.ok_or_else(|| CopyError::CopyFailed {
+            source: source.to_path_buf(),
+            destination: destination.to_path_buf(),
+            reason: format!(
+                "Destination '{}' does not exist, with --parents destination must be a directory",
+                destination.display()
+            ),
         })?;
 
         if !dest_meta.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
+            return Err(CopyError::CopyFailed {
+                source: source.to_path_buf(),
+                destination: destination.to_path_buf(),
+                reason: format!(
                     "Destination '{}' is not a directory, with --parents destination must be a directory",
                     destination.display()
                 ),
-            ));
+            });
         }
 
         with_parents(destination, source)
@@ -291,10 +293,15 @@ pub fn preprocess_file(
         &mut plan,
         source,
         source_root,
-        dest_path,
+        dest_path.clone(),
         &source_metadata,
         options,
-    )?;
+    )
+    .map_err(|e| CopyError::CopyFailed {
+        source: source.to_path_buf(),
+        destination: dest_path,
+        reason: e.to_string(),
+    })?;
     Ok(plan)
 }
 
@@ -303,7 +310,7 @@ pub fn preprocess_directory(
     source_root: &Path,
     destination: &Path,
     options: &CopyOptions,
-) -> io::Result<CopyPlan> {
+) -> CopyResult<CopyPlan> {
     let mut plan = CopyPlan::new();
     if let Some(exclude_rules) = &options.exclude_rules
         && should_exclude(source, source_root, exclude_rules)
@@ -331,7 +338,11 @@ pub fn preprocess_directory(
         FollowSymlink::CommandLineSymlink => {
             let meta = std::fs::symlink_metadata(source)?;
             if meta.file_type().is_symlink() {
-                std::fs::canonicalize(source)?
+                std::fs::canonicalize(source).map_err(|e| CopyError::CopyFailed {
+                    source: source.to_path_buf(),
+                    destination: destination.to_path_buf(),
+                    reason: format!("Failed to canonicalize symlink: {}", e),
+                })?
             } else {
                 source.to_path_buf()
             }
@@ -344,19 +355,24 @@ pub fn preprocess_directory(
         .parallelism(jwalk::Parallelism::RayonNewPool(num_threads))
         .follow_links(follow_symlink)
     {
-        let entry = entry?;
+        let entry = entry.map_err(|e| CopyError::CopyFailed {
+            source: source.to_path_buf(),
+            destination: destination.to_path_buf(),
+            reason: format!("Failed to read directory entry: {}", e),
+        })?;
         let src_path = entry.path();
 
         if src_path == source {
             continue;
         }
 
-        let relative = src_path.strip_prefix(source).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Failed to calculate relative path",
-            )
-        })?;
+        let relative = src_path
+            .strip_prefix(source)
+            .map_err(|_| CopyError::CopyFailed {
+                source: source.to_path_buf(),
+                destination: destination.to_path_buf(),
+                reason: "Failed to calculate relative path".to_string(),
+            })?;
 
         if let Some(exclude_rules) = &options.exclude_rules
             && should_exclude(&src_path, source, exclude_rules)
@@ -364,7 +380,11 @@ pub fn preprocess_directory(
             continue;
         }
         let dest_path = root_destination.join(relative);
-        let metadata = entry.metadata()?;
+        let metadata = entry.metadata().map_err(|e| CopyError::CopyFailed {
+            source: src_path.to_path_buf(),
+            destination: destination.to_path_buf(),
+            reason: format!("Failed to get metadata: {}", e),
+        })?;
 
         if metadata.is_dir() {
             plan.add_directory(Some(src_path.to_path_buf()), dest_path);
@@ -381,13 +401,15 @@ pub fn preprocess_multiple(
     sources: &[PathBuf],
     destination: &Path,
     options: &CopyOptions,
-) -> io::Result<CopyPlan> {
-    let dest_metadata = std::fs::metadata(destination)?;
+) -> CopyResult<CopyPlan> {
+    let dest_metadata = std::fs::metadata(destination)
+        .map_err(|_e| CopyError::InvalidDestination(destination.to_path_buf()))?;
     if !dest_metadata.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("Destination '{}' is not a directory", destination.display()),
-        ));
+        return Err(CopyError::CopyFailed {
+            source: PathBuf::new(),
+            destination: destination.to_path_buf(),
+            reason: format!("Destination '{}' is not a directory", destination.display()),
+        });
     }
 
     let mut plan = CopyPlan::new();
@@ -395,22 +417,33 @@ pub fn preprocess_multiple(
     for source in sources {
         let metadata = match options.follow_symlink {
             FollowSymlink::Dereference | FollowSymlink::CommandLineSymlink => {
-                std::fs::metadata(source)?
+                std::fs::metadata(source)
+                    .map_err(|_e| CopyError::InvalidSource(source.to_path_buf()))?
             }
-            FollowSymlink::NoDereference => std::fs::symlink_metadata(source)?,
+            FollowSymlink::NoDereference => std::fs::symlink_metadata(source)
+                .map_err(|_e| CopyError::InvalidSource(source.to_path_buf()))?,
         };
 
         if metadata.is_dir() {
-            let dir_plan = preprocess_directory(source, source, destination, options)?;
+            let dir_plan =
+                preprocess_directory(source, source, destination, options).map_err(|e| {
+                    CopyError::CopyFailed {
+                        source: source.to_path_buf(),
+                        destination: destination.to_path_buf(),
+                        reason: e.to_string(),
+                    }
+                })?;
             plan.merge(dir_plan);
         } else {
-            let source_root = source.parent().unwrap_or(Path::new("."));
+            let _source_root = source.parent().unwrap_or_else(|| Path::new("."));
 
             let dest_path = if options.parents {
                 with_parents(destination, source)
             } else {
-                destination.join(source.file_name().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "Invalid source path")
+                destination.join(source.file_name().ok_or_else(|| CopyError::CopyFailed {
+                    source: source.to_path_buf(),
+                    destination: destination.to_path_buf(),
+                    reason: "Invalid source path".to_string(),
                 })?)
             };
 
@@ -423,11 +456,16 @@ pub fn preprocess_multiple(
             process_entry(
                 &mut plan,
                 source,
-                source_root,
-                dest_path,
+                source,
+                dest_path.clone(),
                 &metadata,
                 options,
-            )?;
+            )
+            .map_err(|e| CopyError::CopyFailed {
+                source: source.to_path_buf(),
+                destination: dest_path.clone(),
+                reason: e.to_string(),
+            })?;
         }
     }
 

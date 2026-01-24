@@ -1,5 +1,6 @@
 use cpx::cli::args::CLIArgs;
 use cpx::core::copy::{copy, multiple_copy};
+use cpx::error::CpxError;
 use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 use std::process;
@@ -22,7 +23,12 @@ fn main() {
     let abort = Arc::new(AtomicBool::new(false));
     options.abort = abort.clone();
 
-    let mut signals = Signals::new([SIGINT, SIGTERM]).expect("Failed to setup signal handler");
+    let mut signals = Signals::new([SIGINT, SIGTERM])
+        .map_err(CpxError::Io)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to setup signal handler: {}", e);
+            process::exit(1);
+        });
 
     std::thread::spawn({
         let abort = abort.clone();

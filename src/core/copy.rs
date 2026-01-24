@@ -1,6 +1,7 @@
 use crate::cli::args::{BackupMode, CopyOptions, FollowSymlink};
 #[cfg(target_os = "linux")]
 use crate::core::fast_copy::fast_copy;
+use crate::error::{CopyError, CopyResult};
 use crate::utility::backup::{create_backup, generate_backup_path};
 use crate::utility::helper::{
     create_directories, create_hardlink, create_symlink, prompt_overwrite,
@@ -17,37 +18,38 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{path::Path, path::PathBuf};
 
-pub fn copy(source: &Path, destination: &Path, options: &CopyOptions) -> io::Result<()> {
+pub fn copy(source: &Path, destination: &Path, options: &CopyOptions) -> CopyResult<()> {
     let source_metadata = match options.follow_symlink {
-        FollowSymlink::Dereference | FollowSymlink::CommandLineSymlink => {
-            std::fs::metadata(source)?
-        }
-        FollowSymlink::NoDereference => std::fs::symlink_metadata(source)?,
+        FollowSymlink::Dereference | FollowSymlink::CommandLineSymlink => std::fs::metadata(source)
+            .map_err(|_e| CopyError::InvalidSource(source.to_path_buf()))?,
+        FollowSymlink::NoDereference => std::fs::symlink_metadata(source)
+            .map_err(|_e| CopyError::InvalidSource(source.to_path_buf()))?,
     };
     let source_root = source.parent().unwrap_or(source);
     let destination_metadata = std::fs::metadata(destination).ok();
 
     let plan = if source_metadata.is_dir() {
         if !options.recursive {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "'{}' is a directory (not copied, use -r to copy recursively)",
-                    source.display()
-                ),
-            ));
+            return Err(CopyError::CopyFailed {
+                source: source.to_path_buf(),
+                destination: destination.to_path_buf(),
+                reason: "'src' is a directory (not copied, use -r to copy recursively)".to_string(),
+            });
         }
 
         if let Some(dest_meta) = destination_metadata
             && dest_meta.is_file()
         {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("'{}' is a file, expected directory", destination.display()),
-            ));
+            return Err(CopyError::InvalidDestination(destination.to_path_buf()));
         }
 
-        preprocess_directory(source, source_root, destination, options)?
+        preprocess_directory(source, source_root, destination, options).map_err(|e| {
+            CopyError::CopyFailed {
+                source: source.to_path_buf(),
+                destination: destination.to_path_buf(),
+                reason: e.to_string(),
+            }
+        })?
     } else {
         preprocess_file(
             source,
@@ -56,7 +58,12 @@ pub fn copy(source: &Path, destination: &Path, options: &CopyOptions) -> io::Res
             options,
             source_metadata,
             destination_metadata,
-        )?
+        )
+        .map_err(|e| CopyError::CopyFailed {
+            source: source.to_path_buf(),
+            destination: destination.to_path_buf(),
+            reason: e.to_string(),
+        })?
     };
 
     if plan.skipped_files > 0 {
@@ -70,15 +77,21 @@ pub fn multiple_copy(
     sources: Vec<PathBuf>,
     destination: PathBuf,
     options: &CopyOptions,
-) -> io::Result<()> {
-    let plan = preprocess_multiple(&sources, &destination, options)?;
+) -> CopyResult<()> {
+    let plan = preprocess_multiple(&sources, &destination, options).map_err(|e| {
+        CopyError::CopyFailed {
+            source: sources[0].clone(),
+            destination: destination.clone(),
+            reason: e.to_string(),
+        }
+    })?;
     if plan.skipped_files > 0 {
         eprintln!("Skipping {} files that already exist", plan.skipped_files);
     }
     execute_copy(plan, options)
 }
 
-fn execute_copy(plan: CopyPlan, options: &CopyOptions) -> io::Result<()> {
+fn execute_copy(plan: CopyPlan, options: &CopyOptions) -> CopyResult<()> {
     if !options.attributes_only {
         create_directories(&plan.directories)?;
     } else {
@@ -86,20 +99,19 @@ fn execute_copy(plan: CopyPlan, options: &CopyOptions) -> io::Result<()> {
             if let Some(src) = &dir_task.source
                 && std::fs::symlink_metadata(&dir_task.destination).is_ok()
             {
-                preserve::apply_preserve_attrs(src, &dir_task.destination, options.preserve)?;
+                preserve::apply_preserve_attrs(src, &dir_task.destination, options.preserve)
+                    .map_err(|e| CopyError::CopyFailed {
+                        source: src.clone(),
+                        destination: dir_task.destination.clone(),
+                        reason: e.to_string(),
+                    })?;
             }
         }
     }
 
     if options.hard_link {
         for hardlink_task in &plan.hardlinks {
-            if let Err(e) = create_hardlink(hardlink_task, options) {
-                eprintln!(
-                    "Failed to create hardlink {:?} -> {:?}: {}",
-                    hardlink_task.destination, hardlink_task.source, e
-                );
-                return Err(e);
-            }
+            create_hardlink(hardlink_task, options)?;
         }
 
         if plan.total_hardlinks > 0 {
@@ -110,13 +122,10 @@ fn execute_copy(plan: CopyPlan, options: &CopyOptions) -> io::Result<()> {
 
     if options.symbolic_link.is_some() {
         for symlink_task in &plan.symlinks {
-            if let Err(e) = create_symlink(symlink_task) {
-                eprintln!(
-                    "Failed to create symlink {:?} -> {:?}: {}",
-                    symlink_task.destination, symlink_task.source, e
-                );
-                return Err(e);
-            }
+            create_symlink(symlink_task).map_err(|_e| CopyError::SymlinkFailed {
+                source: symlink_task.source.clone(),
+                destination: symlink_task.destination.clone(),
+            })?;
         }
 
         if plan.total_symlinks > 0 {
@@ -152,7 +161,11 @@ fn execute_copy(plan: CopyPlan, options: &CopyOptions) -> io::Result<()> {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(options.concurrency)
             .build()
-            .map_err(|e| io::Error::other(format!("Failed to create thread pool: {}", e)))?;
+            .map_err(|e| CopyError::CopyFailed {
+                source: PathBuf::new(),
+                destination: PathBuf::new(),
+                reason: format!("Failed to create thread pool: {}", e),
+            })?;
 
         let results: Vec<_> = pool.install(|| {
             plan.files
@@ -194,20 +207,21 @@ fn execute_copy(plan: CopyPlan, options: &CopyOptions) -> io::Result<()> {
             eprintln!("Completed:  {} files", completed);
             eprintln!("Remaining:  {} files", plan.total_files - completed);
 
-            return Err(io::Error::new(
+            return Err(CopyError::Io(io::Error::new(
                 io::ErrorKind::Interrupted,
                 "Operation interrupted by user",
-            ));
+            )));
         }
 
         if !errors.is_empty() {
             if let Some(pb) = overall_pb {
                 pb.abandon_with_message("Copy completed with errors");
             }
-            return Err(io::Error::other(format!(
-                "Errors occurred:\n{}",
-                errors.join("\n")
-            )));
+            return Err(CopyError::CopyFailed {
+                source: PathBuf::new(),
+                destination: PathBuf::new(),
+                reason: format!("Errors occurred:\n{}", errors.join("\n")),
+            });
         }
     }
 
@@ -232,7 +246,7 @@ fn copy_core(
     completed_files: &AtomicUsize,
     total_files: usize,
     options: &CopyOptions,
-) -> io::Result<()> {
+) -> CopyResult<()> {
     if options.attributes_only {
         if std::fs::symlink_metadata(destination).is_err() {
             return Ok(());
@@ -264,14 +278,10 @@ fn copy_core(
         use crate::cli::args::ReflinkMode;
         if reflink_mode != ReflinkMode::Never {
             if destination.try_exists().unwrap_or(false) {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    format!(
-                        "cannot reflink '{}' to '{}': destination exists",
-                        source.display(),
-                        destination.display()
-                    ),
-                ));
+                return Err(CopyError::ReflinkFailed {
+                    source: source.to_path_buf(),
+                    destination: destination.to_path_buf(),
+                });
             }
 
             match reflink_copy::reflink(source, destination) {
@@ -281,12 +291,16 @@ fn copy_core(
                     }
                     update_progress(overall_pb, completed_files, total_files, options);
                     if options.preserve != PreserveAttr::none() {
-                        preserve::apply_preserve_attrs(source, destination, options.preserve)?;
+                        preserve::apply_preserve_attrs(source, destination, options.preserve)
+                            .map_err(CopyError::from)?;
                     }
                     return Ok(());
                 }
                 Err(e) if reflink_mode == ReflinkMode::Always => {
-                    return Err(io::Error::new(io::ErrorKind::Unsupported, e));
+                    return Err(CopyError::ReflinkFailed {
+                        source: source.to_path_buf(),
+                        destination: destination.to_path_buf(),
+                    });
                 }
                 Err(_) => {}
             }
@@ -296,15 +310,16 @@ fn copy_core(
     #[cfg(target_os = "linux")]
     {
         if options.abort.load(Ordering::Relaxed) {
-            return Err(io::Error::new(
+            return Err(CopyError::Io(io::Error::new(
                 io::ErrorKind::Interrupted,
                 "Operation aborted by user",
-            ));
+            )));
         }
         if let Ok(true) = fast_copy(source, destination, file_size, overall_pb, options) {
             update_progress(overall_pb, completed_files, total_files, options);
             if options.preserve != PreserveAttr::none() {
-                preserve::apply_preserve_attrs(source, destination, options.preserve)?;
+                preserve::apply_preserve_attrs(source, destination, options.preserve)
+                    .map_err(CopyError::from)?;
             }
             return Ok(());
         }
@@ -317,7 +332,7 @@ fn copy_core(
             let _ = std::fs::remove_file(destination);
             std::fs::File::create(destination)?
         }
-        Err(e) => return Err(e),
+        Err(e) => return Err(CopyError::Io(e)),
     };
 
     let buffer_size: usize = if file_size < 1024 * 1024 {
@@ -358,10 +373,10 @@ fn copy_core(
                 eprintln!("Cleaned up incomplete file: {}", destination.display());
             }
 
-            return Err(io::Error::new(
+            return Err(CopyError::Io(io::Error::new(
                 io::ErrorKind::Interrupted,
                 "Operation aborted by user",
-            ));
+            )));
         }
 
         let bytes_read = src_file.read(&mut buffer)?;
@@ -390,7 +405,8 @@ fn copy_core(
     update_progress(overall_pb, completed_files, total_files, options);
 
     if options.preserve != PreserveAttr::none() {
-        preserve::apply_preserve_attrs(source, destination, options.preserve)?;
+        preserve::apply_preserve_attrs(source, destination, options.preserve)
+            .map_err(CopyError::from)?;
     }
 
     Ok(())

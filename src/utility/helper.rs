@@ -2,6 +2,7 @@ use super::preprocess::{SymlinkKind, SymlinkTask};
 use super::progress_bar::{ProgressBarStyle, ProgressOptions};
 use crate::cli::args::{BackupMode, CopyOptions, FollowSymlink, ReflinkMode, SymlinkMode};
 use crate::config::schema::Config;
+use crate::error::{CopyError, CopyResult};
 use crate::utility::preprocess::HardlinkTask;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -59,44 +60,29 @@ pub fn create_symlink(task: &SymlinkTask) -> io::Result<()> {
     Ok(())
 }
 
-pub fn create_hardlink(task: &HardlinkTask, options: &CopyOptions) -> io::Result<()> {
+pub fn create_hardlink(task: &HardlinkTask, options: &CopyOptions) -> CopyResult<()> {
     if task.destination.try_exists()? {
         if options.interactive && !prompt_overwrite(&task.destination)? {
             return Ok(());
         }
 
         if options.force || options.remove_destination {
-            if let Err(e) = std::fs::remove_file(&task.destination) {
-                return Err(io::Error::new(
-                    e.kind(),
-                    format!(
-                        "Cannot remove existing file '{}': {}",
-                        task.destination.display(),
-                        e
-                    ),
-                ));
+            if let Err(_e) = std::fs::remove_file(&task.destination) {
+                return Err(CopyError::HardlinkFailed {
+                    source: task.source.clone(),
+                    destination: task.destination.clone(),
+                });
             }
         } else {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!(
-                    "Destination '{}' already exists",
-                    task.destination.display()
-                ),
-            ));
+            return Err(CopyError::FileExists(task.destination.clone()));
         }
     }
 
-    std::fs::hard_link(&task.source, &task.destination).map_err(|e| {
-        io::Error::new(
-            e.kind(),
-            format!(
-                "Failed to create hard link '{}' -> '{}': {}",
-                task.source.display(),
-                task.destination.display(),
-                e
-            ),
-        )
+    std::fs::hard_link(&task.source, &task.destination).map_err(|_e| {
+        CopyError::HardlinkFailed {
+            source: task.source.clone(),
+            destination: task.destination.clone(),
+        }
     })?;
 
     Ok(())

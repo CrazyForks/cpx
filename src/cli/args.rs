@@ -1,6 +1,7 @@
 use crate::config::config_command::ConfigCommand;
 use crate::config::loader::{load_config, load_config_file};
 use crate::config::schema::Config;
+use crate::error::{CpxError, CpxResult};
 use crate::utility::helper::parse_progress_bar;
 use crate::utility::progress_bar::ProgressOptions;
 use crate::utility::{
@@ -314,12 +315,12 @@ impl CLIArgs {
         <Self as clap::Parser>::parse()
     }
 
-    pub fn validate(self) -> Result<(Vec<PathBuf>, PathBuf, CopyOptions), String> {
+    pub fn validate(self) -> CpxResult<(Vec<PathBuf>, PathBuf, CopyOptions)> {
         // Handle config command
         if let Commands::Config { command } = &self.command {
-            command
-                .execute()
-                .map_err(|e| format!("Failed to execute config command: {}", e))?;
+            command.execute().map_err(|e| {
+                CpxError::Validation(format!("Failed to execute config command: {}", e))
+            })?;
             std::process::exit(0);
         }
 
@@ -329,7 +330,7 @@ impl CLIArgs {
             _ => unreachable!(),
         };
 
-        let config = load_config_if_needed(&copy_args)?;
+        let config = load_config_if_needed(&copy_args).map_err(CpxError::Config)?;
 
         // Start with config or defaults
         let mut options = if let Some(ref cfg) = config {
@@ -339,14 +340,15 @@ impl CLIArgs {
         };
 
         // CLI args override config
-        apply_cli_overrides(&mut options, &copy_args)?;
+        apply_cli_overrides(&mut options, &copy_args).map_err(CpxError::Validation)?;
 
         // Build exclude rules
-        let all_patterns = build_all_exclude_patterns(&copy_args, config.as_ref())?;
-        options.exclude_rules = build_exclude_rules(all_patterns)?;
+        let all_patterns =
+            build_all_exclude_patterns(&copy_args, config.as_ref()).map_err(CpxError::Exclude)?;
+        options.exclude_rules = build_exclude_rules(all_patterns).map_err(CpxError::Exclude)?;
 
         // Validate conflicts
-        validate_conflicts(&options)?;
+        validate_conflicts(&options).map_err(CpxError::Validation)?;
 
         // Handle attributes_only special case
         if options.attributes_only {
@@ -365,15 +367,13 @@ impl CLIArgs {
     }
 }
 
-fn load_config_if_needed(copy_args: &CopyArgs) -> Result<Option<Config>, String> {
+fn load_config_if_needed(copy_args: &CopyArgs) -> crate::error::ConfigResult<Option<Config>> {
     if copy_args.no_config {
         return Ok(None);
     }
 
     if let Some(custom_path) = &copy_args.config {
-        return Ok(Some(
-            load_config_file(custom_path).map_err(|e| format!("Failed to load config: {}", e))?,
-        ));
+        return Ok(Some(load_config_file(custom_path)?));
     }
 
     Ok(Some(load_config()))
@@ -417,8 +417,8 @@ fn apply_cli_overrides(options: &mut CopyOptions, copy_args: &CopyArgs) -> Resul
         options.reflink = copy_args.reflink;
     }
     if let Some(preserve_str) = &copy_args.preserve {
-        options.preserve =
-            PreserveAttr::from_string(preserve_str).expect("unable to parse preserve attribute");
+        options.preserve = PreserveAttr::from_string(preserve_str)
+            .map_err(|e| format!("unable to parse preserve attribute: {}", e))?;
     }
 
     options.concurrency = copy_args.concurrency;
@@ -431,7 +431,7 @@ fn apply_cli_overrides(options: &mut CopyOptions, copy_args: &CopyArgs) -> Resul
 fn build_all_exclude_patterns(
     copy_args: &CopyArgs,
     config: Option<&Config>,
-) -> Result<Vec<ExcludePattern>, String> {
+) -> crate::error::ExcludeResult<Vec<ExcludePattern>> {
     let mut all_patterns = Vec::new();
 
     if let Some(cfg) = config {
@@ -495,7 +495,7 @@ impl CopyArgs {
         }
     }
 
-    pub fn parse_exclude_patterns(&self) -> Result<Vec<ExcludePattern>, String> {
+    pub fn parse_exclude_patterns(&self) -> crate::error::ExcludeResult<Vec<ExcludePattern>> {
         let mut patterns = Vec::new();
 
         for pattern_str in &self.exclude {
@@ -541,7 +541,7 @@ mod tests {
 
         let result = args.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("symbolic-link"));
+        assert!(result.unwrap_err().to_string().contains("symbolic-link"));
     }
 
     #[test]
@@ -575,7 +575,7 @@ mod tests {
 
         let result = args.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("continue"));
+        assert!(result.unwrap_err().to_string().contains("continue"));
     }
 
     #[test]
@@ -609,7 +609,7 @@ mod tests {
 
         let result = args.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("link"));
+        assert!(result.unwrap_err().to_string().contains("link"));
     }
 
     #[test]
