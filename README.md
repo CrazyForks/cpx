@@ -22,16 +22,8 @@
 `cpx` is a modern replacement for the traditional `cp` command, built with Rust for maximum performance and safety on Linux systems.
 ```bash
 cpx -r projects/ /backup/
-Copying 51% ████░░░░ ETA:00:06
+Copying 51% ████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ETA:00:06
 ```
-
-**Perfect for:**
-- Large file transfers with progress tracking
-- Resumable copies that survive interruptions
-- Development project backups (with smart exclusions)
-- Server deployments with safety features
-- CoW snapshots on Btrfs/XFS
-
 ## Features
 
 ### 🚀 **Performance First**
