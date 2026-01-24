@@ -283,7 +283,7 @@ cargo run -- -r test_data/ test_dest/
 
 ## License
 
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+- MIT license [LICENSE](https://github.com/11happy/cpx/blob/main/LICENSE)
 
 
 ## Acknowledgments
