@@ -5,7 +5,7 @@
 **A modern, fast file copy tool for Linux with progress bars, resume capability, and more.**
 
 [![Crates.io](https://img.shields.io/crates/v/cpx.svg)](https://crates.io/crates/cpx)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![CI](https://github.com/11happy/cpx/actions/workflows/ci.yml/badge.svg)](
 https://github.com/11happy/cpx/actions/workflows/ci.yml
 )
