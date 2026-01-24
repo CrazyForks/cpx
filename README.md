@@ -191,11 +191,10 @@ mode = "auto"
 
 `cpx` is built for speed. Quick comparison:
 
-| Task | cp | rsync | cpx |
+| Task | cp | cpx | speedup |
 |------|-----|-------|-----|
-| 10K small files | 8.2s | 12.4s | **3.1s** |
-| 10GB file | 42.3s | 43.1s | **38.7s** |
-| Reflink (Btrfs) | 42.3s | N/A | **0.3s** |
+| VsCode (~15k files) | 1084ms | 263ms | 4.12x |
+| rust (~65k files) | 4.553s | 1.091s  |  4.17x |
 
 **See [benchmarks.md](docs/benchmarks.md) for detailed methodology and more comparisons.**
 
