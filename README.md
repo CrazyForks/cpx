@@ -78,15 +78,6 @@ cpx source.txt dest.txt
 # Copy directory recursively
 cpx -r source_dir/ dest_dir/
 
-# Copy with progress bar
-cpx -r large_dir/ /backup/
-```
-
-### Common Use Cases
-```bash
-# Simple copy
-cpx source.txt destination.txt
-
 # exclude build artifacts
 cpx -r -e "node_modules" -e ".git" -e "target" my-project/ /backup/
 
