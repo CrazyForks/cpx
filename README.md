@@ -28,9 +28,12 @@
 - 🚀 Fast parallel copying (upto 5x faster than cp [benchmarks](docs/benchmarks.md))
 - 📊 Beautiful progress bars (customizable)
 - ⏸️ Resume interrupted transfers
+  ![three](https://github.com/user-attachments/assets/f15b9037-c510-4d83-b036-3c3ccaf64759)
 - 🎯 Exclude patterns (gitignore-style)
 - ⚙️ Flexible configuration
 - 🛑 Graceful Ctrl+C handling with resume hints
+
+
 
 
 ## Installation
