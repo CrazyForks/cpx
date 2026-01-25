@@ -29,7 +29,7 @@ cp:
 rsync:
 | Tool | Mean Time | Speedup |
 |------|-----------|---------|
-| cpx | **30.37s ± 0.82s** | **2.81× faster** |
+| cpx | **30.37s ± 0.82s** | **2.67× faster** |
 | rsync | 80.54s ± 2.567s | baseline |
 
 **Time Saved:** 50.54 seconds
