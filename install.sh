@@ -1,6 +1,5 @@
 #!/bin/bash
 set -e
-
 # cpx installer script
 # Usage: curl -fsSL https://raw.githubusercontent.com/11happy/cpx/main/install.sh | bash
 
@@ -30,16 +29,15 @@ error() {
 # Detect platform
 detect_platform() {
     local os arch
-
     os="$(uname -s)"
     arch="$(uname -m)"
 
     case "$os" in
         Linux)
             case "$arch" in
-                x86_64) echo "linux-x86_64" ;;
-                aarch64|arm64) echo "linux-aarch64" ;;
-                armv7l) echo "linux-armv7" ;;
+                x86_64) echo "linux-x86_64-musl" ;;
+                aarch64|arm64) echo "linux-aarch64-musl" ;;
+                armv7l) echo "linux-armv7-musl" ;;
                 *) error "Unsupported architecture: $arch" ;;
             esac
             ;;
@@ -52,7 +50,6 @@ detect_platform() {
 # Get latest release version
 get_latest_version() {
     local api_url="https://api.github.com/repos/$REPO/releases/latest"
-
     if command -v curl &> /dev/null; then
         curl -s "$api_url" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/'
     elif command -v wget &> /dev/null; then
@@ -86,9 +83,13 @@ install_cpx() {
 
     # Download
     if command -v curl &> /dev/null; then
-        curl -fsSL "$download_url" -o "$tmp_dir/$tarball_name"
+        if ! curl -fsSL "$download_url" -o "$tmp_dir/$tarball_name"; then
+            error "Failed to download from: $download_url"
+        fi
     elif command -v wget &> /dev/null; then
-        wget -q "$download_url" -O "$tmp_dir/$tarball_name"
+        if ! wget -q "$download_url" -O "$tmp_dir/$tarball_name"; then
+            error "Failed to download from: $download_url"
+        fi
     fi
 
     # Extract
