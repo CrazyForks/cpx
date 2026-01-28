@@ -76,7 +76,6 @@ See all hyperfine reports(cp,rsync,xcp) here https://github.com/11happy/cpx/tree
 
 **CPX advantages:**
 - Parallel I/O operations (16 threads ) [can be more depending on system]
-- Linux `copy_file_range()` syscall
 - Adaptive buffer sizing (64KB-2MB)
 - Parallel directory traversal
 
