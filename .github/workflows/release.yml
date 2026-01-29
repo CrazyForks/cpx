@@ -100,9 +100,6 @@ jobs:
           cd -
           mv target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz .
 
-      - name: Generate SHA256
-        run: sha256sum ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
-
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
@@ -112,13 +109,3 @@ jobs:
           asset_path: ./${{ matrix.asset_name }}.tar.gz
           asset_name: ${{ matrix.asset_name }}.tar.gz
           asset_content_type: application/gzip
-
-      - name: Upload SHA256
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./${{ matrix.asset_name }}.tar.gz.sha256
-          asset_name: ${{ matrix.asset_name }}.tar.gz.sha256
-          asset_content_type: text/plain
