@@ -25,7 +25,20 @@ pub fn create_directories(dirs: &[crate::utility::preprocess::DirectoryTask]) ->
     Ok(())
 }
 
-pub fn create_symlink(task: &SymlinkTask) -> io::Result<()> {
+pub fn create_symlink(task: &SymlinkTask, options: &CopyOptions) -> io::Result<()> {
+    if task.destination.is_symlink() || task.destination.try_exists().unwrap_or(false) {
+        if options.interactive && !prompt_overwrite(&task.destination).map_err(io::Error::other)? {
+            return Ok(());
+        }
+        if options.force || options.remove_destination || options.resume {
+            std::fs::remove_file(&task.destination)?;
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("destination already exists: {:?}", task.destination),
+            ));
+        }
+    }
     let target = match task.kind {
         SymlinkKind::PreserveExact => task.source.clone(),
         SymlinkKind::AbsoluteToSource => task.source.canonicalize()?,
@@ -66,7 +79,7 @@ pub fn create_hardlink(task: &HardlinkTask, options: &CopyOptions) -> CopyResult
             return Ok(());
         }
 
-        if options.force || options.remove_destination {
+        if options.force || options.remove_destination || options.resume {
             if let Err(_e) = std::fs::remove_file(&task.destination) {
                 return Err(CopyError::HardlinkFailed {
                     source: task.source.clone(),
@@ -296,6 +309,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let source = temp_dir.path().join("source.txt");
         let dest = temp_dir.path().join("link.txt");
+        let options = CopyOptions::none();
 
         fs::write(&source, b"test content").unwrap();
 
@@ -305,7 +319,7 @@ mod tests {
             kind: SymlinkKind::AbsoluteToSource,
         };
 
-        create_symlink(&task).unwrap();
+        create_symlink(&task, &options).unwrap();
 
         assert!(dest.exists());
         assert!(dest.symlink_metadata().unwrap().is_symlink());
@@ -322,6 +336,7 @@ mod tests {
         let dest_dir = temp_dir.path().join("links");
         fs::create_dir(&dest_dir).unwrap();
         let dest = dest_dir.join("link.txt");
+        let options = CopyOptions::none();
 
         fs::write(&source, b"test content").unwrap();
 
@@ -331,7 +346,7 @@ mod tests {
             kind: SymlinkKind::RelativeToSource,
         };
 
-        create_symlink(&task).unwrap();
+        create_symlink(&task, &options).unwrap();
 
         assert!(dest.exists());
         assert!(dest.symlink_metadata().unwrap().is_symlink());
@@ -347,6 +362,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let source_dir = temp_dir.path().join("source_dir");
         let dest_link = temp_dir.path().join("link_dir");
+        let options = CopyOptions::none();
 
         fs::create_dir(&source_dir).unwrap();
         fs::write(source_dir.join("file.txt"), b"content").unwrap();
@@ -357,7 +373,7 @@ mod tests {
             kind: SymlinkKind::AbsoluteToSource,
         };
 
-        create_symlink(&task).unwrap();
+        create_symlink(&task, &options).unwrap();
 
         assert!(dest_link.exists());
         assert!(dest_link.symlink_metadata().unwrap().is_symlink());
@@ -370,6 +386,7 @@ mod tests {
         let source = temp_dir.path().join("a/b/c/source.txt");
         fs::create_dir_all(source.parent().unwrap()).unwrap();
         fs::write(&source, b"test").unwrap();
+        let options = CopyOptions::none();
 
         let dest_dir = temp_dir.path().join("x/y/z");
         fs::create_dir_all(&dest_dir).unwrap();
@@ -381,7 +398,7 @@ mod tests {
             kind: SymlinkKind::RelativeToSource,
         };
 
-        create_symlink(&task).unwrap();
+        create_symlink(&task, &options).unwrap();
 
         assert!(dest.exists());
         let link_target = fs::read_link(&dest).unwrap();
@@ -395,6 +412,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let source = temp_dir.path().join("nonexistent.txt");
         let dest = temp_dir.path().join("link.txt");
+        let options = CopyOptions::none();
 
         let task = SymlinkTask {
             source: source.clone(),
@@ -402,7 +420,7 @@ mod tests {
             kind: SymlinkKind::AbsoluteToSource,
         };
 
-        let result = create_symlink(&task);
+        let result = create_symlink(&task, &options);
         assert!(result.is_err());
     }
 
@@ -412,6 +430,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let source = temp_dir.path().join("nonexistent.txt");
         let dest = temp_dir.path().join("link.txt");
+        let options = CopyOptions::none();
 
         let task = SymlinkTask {
             source: source.clone(),
@@ -419,7 +438,7 @@ mod tests {
             kind: SymlinkKind::RelativeToSource,
         };
 
-        create_symlink(&task).unwrap();
+        create_symlink(&task, &options).unwrap();
         assert!(dest.symlink_metadata().unwrap().is_symlink());
         assert!(dest.metadata().is_err());
     }

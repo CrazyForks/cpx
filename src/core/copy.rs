@@ -122,7 +122,7 @@ fn execute_copy(plan: CopyPlan, options: &CopyOptions) -> CopyResult<()> {
 
     if !plan.symlinks.is_empty() {
         for symlink_task in &plan.symlinks {
-            create_symlink(symlink_task).map_err(|_e| CopyError::SymlinkFailed {
+            create_symlink(symlink_task, options).map_err(|_e| CopyError::SymlinkFailed {
                 source: symlink_task.source.clone(),
                 destination: symlink_task.destination.clone(),
             })?;
