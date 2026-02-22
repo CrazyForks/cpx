@@ -225,11 +225,7 @@ mode = "auto"
 | macOS | 🔄 Planned | To be released |
 | Windows | 🔄 Planned | To be released |
 
-## Contributing
-
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Quick Start for Developers
+## Quick Start for Developers
 ```bash
 git clone https://github.com/11happy/cpx.git
 cd cpx
