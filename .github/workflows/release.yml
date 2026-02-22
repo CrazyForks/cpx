@@ -1,5 +1,4 @@
 name: Release
-
 on:
   push:
     tags:
@@ -13,37 +12,19 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
+      - uses: actions/checkout@v3
+
       - name: Get version from tag
         id: get_version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref }}
-          release_name: cpx v${{ steps.get_version.outputs.version }}
-          draft: false
-          prerelease: false
-          body: |
-            ## What's Changed
-
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
-
-            ## Installation
-
-            ### Quick install (Linux x86_64)
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
-            ```
-
-            ### Manual download
-            Download the appropriate binary for your platform below and extract it to a directory in your PATH.
+          name: cpx v${{ steps.get_version.outputs.version }}
+          generate_release_notes: true
 
   build-release:
     needs: create-release
@@ -101,11 +82,6 @@ jobs:
           mv target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz .
 
       - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./${{ matrix.asset_name }}.tar.gz
-          asset_name: ${{ matrix.asset_name }}.tar.gz
-          asset_content_type: application/gzip
+          files: ./${{ matrix.asset_name }}.tar.gz

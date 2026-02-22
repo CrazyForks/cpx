@@ -60,6 +60,20 @@ wget -qO- https://raw.githubusercontent.com/11happy/cpx/main/install.sh | bash
 cargo install cpx
 ```
 
+### Arch Linux (AUR)
+> Added by community
+```bash
+yay -S cpx-copy
+```
+
+
+### Nix / NixOS
+> Added by community
+```bash
+nix-shell -p cpx
+```
+
+
 ### From Source
 ```bash
 cargo install --git https://github.com/11happy/cpx
