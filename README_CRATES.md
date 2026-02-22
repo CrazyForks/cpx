@@ -58,9 +58,7 @@ cargo install cpx
 
 ### From Source
 ```bash
-git clone https://github.com/11happy/cpx.git
-cd cpx
-cargo install --path .
+cargo install --git https://github.com/11happy/cpx
 cpx --version
 ```
 
