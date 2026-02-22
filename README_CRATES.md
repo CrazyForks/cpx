@@ -212,7 +212,7 @@ mode = "auto"
 
 `cpx` is built for speed. Quick comparison:
 
-| Task | cp | cpx | speedup |
+| Task | cp | cpx -j16 | speedup |
 |------|-----|-------|-----|
 | VsCode (~15k files) | 1084ms | 263ms | 4.12x |
 | rust (~65k files) | 4.553s | 1.091s  |  4.17x |
@@ -231,14 +231,8 @@ mode = "auto"
 | Platform | Status | Notes |
 |----------|--------|-------|
 | **Linux** | ✅ Supported | Fast copy supported for (kernel 4.5+) |
-| macOS | 🔄 Planned | Basic support coming soon |
-| Windows | 🔄 Planned | Future release |
-
-
-**Linux-specific optimizations:**
-- `copy_file_range` syscall (kernel 4.5+)
-- SELinux context preservation
-- Extended attributes support
+| macOS | 🔄 Planned | To be released |
+| Windows | 🔄 Planned | To be released |
 
 ## Contributing
 
@@ -258,22 +252,6 @@ cargo clippy
 # Try it out
 cargo run -- -r test_data/ test_dest/
 ```
-
-## Roadmap
-
-**Current (v0.1)**
-- [x] Core copy functionality
-- [x] Progress bars
-- [x] Resume capability
-- [x] Exclude patterns
-- [x] Configuration system
-- [x] Reflink support
-- [x] Hard link preservation
-
-**Upcoming (v0.2)**
-- [ ] macOS support
-- [ ] Windows support
-
 
 ## License
 
