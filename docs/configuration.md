@@ -381,7 +381,6 @@ Copying: 67/100 [=========================>·········] files 67% | 1.2GB
 Here's a fully documented configuration file with common settings:
 ```toml
 # cpx configuration file
-# For more information, see: https://github.com/yourusername/cpx/docs/configuration.md
 
 # Exclude patterns (glob syntax supported)
 # Example: patterns = ["*.tmp", "*.log", "node_modules", ".git"]
