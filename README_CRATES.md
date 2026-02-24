@@ -221,7 +221,6 @@ mode = "auto"
 
 ## Documentation
 
-- **[Examples](docs/examples.md)** - Real-world usage patterns and workflows
 - **[Configuration Guide](docs/configuration.md)** - Complete config reference
 - **[Benchmarks](docs/benchmarks.md)** - Performance analysis and comparisons
 - **[Contributing](CONTRIBUTING.md)** - How to contribute
