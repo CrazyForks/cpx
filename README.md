@@ -39,12 +39,6 @@
 
 ## Installation
 
-### Prerequisites
-
-- **Linux** (kernel 4.5+ recommended for fast copy)
-- **Rust** 1.70 or later
-
-
 ### Quick Install
 ```bash
 curl -fsSL https://raw.githubusercontent.com/11happy/cpx/main/install.sh | bash
@@ -240,6 +234,11 @@ cargo clippy
 cargo run -- -r test_data/ test_dest/
 ```
 
+## Tests
+
+Some tests are already ported from the [GNU coreutils cp test suite](https://github.com/coreutils/coreutils/tree/master/tests/cp), still porting more [GNU ported tests](https://github.com/11happy/cpx/tree/main/tests/gnu).
+
+Found wrong behavior? [File an issue](https://github.com/11happy/cpx/issues), PRs for more tests are always welcome!
 
 ## License
 
